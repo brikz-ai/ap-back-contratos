@@ -1,0 +1,16 @@
+# Controla o que `gcloud builds submit` envia como fonte do build
+# (independente do .dockerignore, que só controla o contexto do `docker
+# build` já enviado). Explícito em vez de depender do fallback
+# (#!include:.gitignore).
+.git
+.gitignore
+.claude
+.superpowers
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.env
+.env.*
+!.env.example
