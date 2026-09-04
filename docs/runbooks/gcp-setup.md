@@ -284,4 +284,49 @@ Acompanhar: `gcloud builds list --region=southamerica-east1 --limit=5`
 
 Feito em 2026-09-04: conexão `optin-github` reaproveitada, repositório
 `contratos-back` registrado, trigger `contratos-deploy-master` criado —
-verificado sem `approvalConfig` (aprovação automática).
+verificado sem `approvalConfig` (aprovação automática). Testado com um
+push real (o commit da seção 6b neste próprio runbook): build
+`ae5f5ce9-9087-48f3-9644-3c862bb2ff17` disparado automaticamente,
+`SUCCESS`, serviço respondendo normalmente depois do redeploy.
+
+## 9. Smoke test pós-deploy
+
+    URL=$(gcloud run services describe contratos-service --region southamerica-east1 --format="value(status.url)")
+    curl -s -w "\n%{http_code}\n" "$URL/api/v1/health"                                              # 200
+    curl -s -w "\n%{http_code}\n" "$URL/api/v1/contratos/<cnpj>"                                     # 200, {"dados": []}
+    curl -s -w "\n%{http_code}\n" -u "<webhook_basic_user>:<webhook_basic_password>" \
+      -X POST "$URL/api/v1/webhooks/contrato/<cnpj>" -H "Content-Type: application/json" \
+      -d '{"tipoEvento": "contrato", "dataHoraEvento": "...", "evento": {...}}'                      # 202
+    curl -s -w "\n%{http_code}\n" -X POST "$URL/api/v1/webhooks/contrato/<cnpj>" -d '{}'              # 401 (da aplicação)
+
+Feito em 2026-09-04: os 4 checks rodados contra
+`https://contratos-service-6sy5bhymwq-rj.a.run.app` e tenant
+`38138785000136` — `/health` 200; `/contratos/38138785000136` 200 com
+`{"dados": []}` (banco novo, vazio); webhook com Basic Auth válido 202;
+webhook sem Basic Auth 401 com corpo `{"erro": "autenticação inválida"}`
+(confirma que é a aplicação rejeitando, não o Google Frontend — o serviço
+é público, `--allow-unauthenticated`).
+
+## 10. Pendências conhecidas (não resolvidas por este runbook)
+
+- **Rotas `/api/v1/contratos/<financiador_id>` sem autenticação de aplicação.**
+  O serviço é público (`--allow-unauthenticated`, necessário pro webhook da
+  CERC) e essas rotas não checam nada — qualquer um que souber um
+  `financiador_id` lê/escreve contratos. Ver design 2026-09-04 §2.2/§6.
+- **Registro do webhook na CERC:** pedir à CERC o cadastro de
+  `tipoEvento=contrato` apontando pra
+  `https://contratos-service-6sy5bhymwq-rj.a.run.app/api/v1/webhooks/contrato/<cnpj>`,
+  por tenant — não reaproveita o webhook de agenda/UR do
+  `ap-back-consulta-agenda` (evento diferente, `tipoEvento=agenda`). Sem
+  isso, o serviço nunca recebe webhooks reais da CERC, mesmo com toda a
+  infra no ar.
+- **`_TENANTS_JOBS_PERIODICOS` hardcoded** (`apps/contratos/views.py`) —
+  hoje só `12345678000199` (CNPJ de dev), que não foi provisionado nesta
+  infra; o job diário falha pra esse tenant até o código ser atualizado
+  com `38138785000136` (ou o dev CNPJ ser provisionado também) e
+  reimplantado.
+- **Dev local não migrado** — `.env` local continua na instância antiga
+  (`registradora-506000:contratos-db`); fora do escopo deste runbook.
+- **Repositório antigo** (`rdelimasilva/ap-back-novo-contrato`) ficou
+  obsoleto depois que o remote mudou para `brikzai/ap-back-contratos` —
+  decidir se arquiva ou apenas abandona.
