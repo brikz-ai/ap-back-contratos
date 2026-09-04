@@ -170,3 +170,31 @@ seção 3).
 Feito em 2026-09-04: schema aplicado em `ap_38138785000136_contratos` — 12
 tabelas confirmadas (`contrato`, `garantia`, `garantia_ur`, `webhook_inbox`,
 `cerc_requisicao`, `dominio_arranjo`, `schema_aplicado`, entre outras).
+
+## 6. Primeiro deploy (cloudbuild.yaml)
+
+    gcloud builds submit --config cloudbuild.yaml --substitutions=_TAG=$(git rev-parse --short HEAD)
+
+O que acontece: build → push → `gcloud run deploy contratos-service`. Sem
+jobs de migration (diferente do optin) — o schema já foi aplicado
+manualmente na seção 5 antes deste primeiro deploy.
+
+URL do serviço: `gcloud run services describe contratos-service --region southamerica-east1 --format="value(status.url)"`
+
+Se `/api/v1/health` voltar `403` do Google Frontend (não da aplicação): é a
+mesma Domain Restricted Sharing já documentada no runbook do optin — a
+exceção de organização é por projeto (`brikz-ap`), vale automaticamente
+aqui (confirmado: não precisou repetir nada).
+
+**Achado nesta implementação:** a primeira tentativa de deploy falhou —
+`--set-env-vars` usava `^@^` como separador (copiado do optin, pra escapar
+as vírgulas de `CORS_ALLOWED_ORIGINS`), mas `PUBSUB_PUSH_INVOKER_SA` é um
+e-mail de service account que também contém `@`, quebrando o parser
+(`Bad syntax for dict arg`). Corrigido trocando o separador pra `|` no
+`cloudbuild.yaml`.
+
+Feito em 2026-09-04: `gcloud builds submit --substitutions=_TAG=e8780b8` →
+`SUCCESS` (~2min, build+push+deploy, sem jobs). Serviço `contratos-service`
+no ar, revisão `contratos-service-00001-fzk`, URL
+`https://contratos-service-6sy5bhymwq-rj.a.run.app`. `/api/v1/health` → 200
+de primeira (sem precisar do binding manual de IAM que o optin precisou).
