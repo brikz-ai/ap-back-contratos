@@ -95,3 +95,46 @@ SQL) e os privilégios são concedidos à parte. Privilégio mais restrito
 Feito em 2026-09-04: usuário `contratos_app` criado; banco
 `ap_38138785000136_contratos` criado; `GRANT ALL PRIVILEGES ON DATABASE` e
 `GRANT ALL ON SCHEMA public` aplicados via Cloud SQL Studio.
+
+## 4. Segredos estáticos e por tenant
+
+    python -c 'import secrets; print(secrets.token_urlsafe(50))' \
+      | gcloud secrets create DJANGO_SECRET_KEY_CONTRATOS --data-file=- --replication-policy=user-managed --locations=southamerica-east1
+
+**Nome com sufixo `_CONTRATOS`:** o optin já tem um segredo `DJANGO_SECRET_KEY`
+sem sufixo neste mesmo projeto — reaproveitar o nome faria os dois serviços
+compartilharem a mesma chave de assinatura Django sem essa ser a intenção.
+Descoberto na prática: a primeira tentativa de criar `DJANGO_SECRET_KEY`
+falhou com "already exists" (segredo do optin). O env var dentro do
+container continua `DJANGO_SECRET_KEY` (nome que `config/settings.py` já
+lê) — só o nome do segredo no Secret Manager tem o sufixo; o mapeamento
+fica no `--set-secrets` do `cloudbuild.yaml`
+(`DJANGO_SECRET_KEY=DJANGO_SECRET_KEY_CONTRATOS:latest`).
+
+Segredo por tenant (`TENANT_<cnpj>_CONFIG_CONTRATOS`, JSON) — monte num
+arquivo temporário local (nunca em pipe triplo — confirme sempre com
+`gcloud secrets versions list <nome>` depois), suba com `--data-file=<arquivo>`
+e apague o arquivo em seguida:
+
+    gcloud secrets create TENANT_<cnpj>_CONFIG_CONTRATOS --data-file=<arquivo> \
+      --replication-policy=user-managed --locations=southamerica-east1
+
+Chaves do JSON: `cloudsql_connection_name` (sempre
+`brikz-ap:southamerica-east1:optin-pg`), `cloudsql_db_user`
+(`contratos_app`), `cloudsql_db_password`, `cloudsql_db_name`
+(`ap_<cnpj>_contratos`), `cloudsql_ip_type` (`PUBLIC`), `cerc_client_id`,
+`cerc_client_secret`, `webhook_basic_user`, `webhook_basic_password` —
+formato já implementado em `shared/tenant_config.py`, sem mudança de código.
+
+Rotação de senha do `contratos_app`: `gcloud sql users set-password
+contratos_app --instance=optin-pg --password=...` e nova versão de **cada**
+`TENANT_<cnpj>_CONFIG_CONTRATOS` (o usuário é compartilhado entre tenants,
+mas cada segredo guarda a senha atual); reiniciar o service (cache por
+processo em `shared/cloudsql_client.py`).
+
+Feito em 2026-09-04: `DJANGO_SECRET_KEY_CONTRATOS` criado (versão 1);
+`TENANT_38138785000136_CONFIG_CONTRATOS` criado (versão 1) com os campos
+CERC/webhook reaproveitados do `.env` local (mesmas credenciais de
+homologação já usadas pelo optin — CNPJ participante `38138785000136`) e
+os campos `cloudsql_*` apontando pra `optin-pg`/`contratos_app`/
+`ap_38138785000136_contratos`.
