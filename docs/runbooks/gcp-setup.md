@@ -133,8 +133,40 @@ mas cada segredo guarda a senha atual); reiniciar o service (cache por
 processo em `shared/cloudsql_client.py`).
 
 Feito em 2026-09-04: `DJANGO_SECRET_KEY_CONTRATOS` criado (versão 1);
-`TENANT_38138785000136_CONFIG_CONTRATOS` criado (versão 1) com os campos
-CERC/webhook reaproveitados do `.env` local (mesmas credenciais de
-homologação já usadas pelo optin — CNPJ participante `38138785000136`) e
-os campos `cloudsql_*` apontando pra `optin-pg`/`contratos_app`/
-`ap_38138785000136_contratos`.
+`TENANT_38138785000136_CONFIG_CONTRATOS` criado com os campos CERC/webhook
+reaproveitados do `.env` local (mesmas credenciais de homologação já usadas
+pelo optin — CNPJ participante `38138785000136`) e os campos `cloudsql_*`
+apontando pra `optin-pg`/`contratos_app`/`ap_38138785000136_contratos`.
+Versão 1 acabou com uma senha que a autenticação Postgres rejeitou (ver
+seção 5 — motivo não identificado, resolvido resetando a senha); versão 1
+desabilitada, versão 2 (com a senha corrigida) é a `:latest` em uso.
+
+## 5. Schema do tenant
+
+Sem migration runner (decisão YAGNI, design original) — aplica direto via
+`scripts/apply_schema.py`, apontando temporariamente as env vars pro
+tenant (nunca editar o `.env` versionado):
+
+    export CLOUDSQL_CONNECTION_NAME="brikz-ap:southamerica-east1:optin-pg"
+    export CLOUDSQL_DB_USER="contratos_app"
+    export CLOUDSQL_DB_PASSWORD="<senha do contratos_app>"
+    export CLOUDSQL_DB_NAME="ap_<cnpj>_contratos"
+    python scripts/apply_schema.py sql/schema/01-contratos-schema.sql
+    python scripts/apply_schema.py sql/schema/02-contratos-schema-fixes.sql
+
+Idempotente: reaplicar um arquivo já aplicado (mesmo checksum) é um no-op
+(confirmado rodando o segundo arquivo duas vezes).
+
+Conexão via Cloud SQL Python Connector usa Application Default Credentials
+(ADC) da sua conta gcloud — se expiradas, `apply_schema.py` falha com
+`RefreshError: Reauthentication is needed`; resolver com
+`gcloud auth application-default login --account=ricardo@brikz.ai`
+(login interativo, abre o navegador).
+
+Onboarding de um tenant novo repete estes dois comandos com o
+`CLOUDSQL_DB_NAME` novo (depois de criar o banco e conceder privilégios,
+seção 3).
+
+Feito em 2026-09-04: schema aplicado em `ap_38138785000136_contratos` — 12
+tabelas confirmadas (`contrato`, `garantia`, `garantia_ur`, `webhook_inbox`,
+`cerc_requisicao`, `dominio_arranjo`, `schema_aplicado`, entre outras).
