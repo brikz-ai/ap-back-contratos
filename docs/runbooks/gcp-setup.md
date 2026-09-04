@@ -198,3 +198,32 @@ Feito em 2026-09-04: `gcloud builds submit --substitutions=_TAG=e8780b8` →
 no ar, revisão `contratos-service-00001-fzk`, URL
 `https://contratos-service-6sy5bhymwq-rj.a.run.app`. `/api/v1/health` → 200
 de primeira (sem precisar do binding manual de IAM que o optin precisou).
+
+## 7. Pub/Sub — processamento assíncrono do webhook
+
+    gcloud pubsub topics create contratos-webhook-inbox
+    SERVICE_URL="$(gcloud run services describe contratos-service --region southamerica-east1 --format='value(status.url)')"
+    gcloud pubsub subscriptions create contratos-webhook-inbox-push \
+      --topic=contratos-webhook-inbox \
+      --push-endpoint="${SERVICE_URL}/api/v1/webhooks/contrato/processar" \
+      --push-auth-service-account=contratos-pubsub-push@brikz-ap.iam.gserviceaccount.com \
+      --push-auth-token-audience="https://contratos-service.internal/webhooks/contrato/processar" \
+      --ack-deadline=30
+
+A audiência (`--push-auth-token-audience`) é uma string fixa acordada com o
+env var `PUBSUB_PUSH_AUDIENCE` do Cloud Run (`cloudbuild.yaml`) — **não** é
+a URL real do serviço, decisão deliberada pra não precisar redeployar toda
+vez que a URL mudasse. `shared/pubsub_auth.py` valida essa audiência e o
+e-mail da service account contra `PUBSUB_PUSH_INVOKER_SA`.
+
+Teste manual sem esperar um webhook real da CERC:
+
+    gcloud pubsub topics publish contratos-webhook-inbox \
+      --message='{"webhook_inbox_id": "id-de-teste", "financiador_id": "<cnpj>"}'
+    gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="contratos-service"' --limit 20 --freshness=5m
+
+Feito em 2026-09-04: tópico e subscription criados, publish de teste
+confirmado nos logs — `[Processor] webhook_inbox_id=... não encontrado ...
+condição permanentemente irrecuperável, confirmando entrega` (204), sem
+nenhum erro de OIDC. Confirma que a autenticação da push subscription
+está correta ponta a ponta.
