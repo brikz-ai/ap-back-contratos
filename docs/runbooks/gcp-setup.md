@@ -257,3 +257,31 @@ Feito em 2026-09-04: job criado, `state: ENABLED`. Disparo manual
 confirmou OIDC correto (chegou até a lógica de negócio, sem 401) — falhou
 depois por causa da pendência acima (`12345678000199` não provisionado),
 comportamento esperado e não bloqueante pra este runbook.
+
+## 6b. Deploy automático (Cloud Build trigger)
+
+    gcloud builds connections describe optin-github --region=southamerica-east1
+    gcloud builds repositories create contratos-back \
+      --connection=optin-github --region=southamerica-east1 \
+      --remote-uri=https://github.com/brikzai/ap-back-contratos.git
+    gcloud builds triggers create github \
+      --name=contratos-deploy-master \
+      --region=southamerica-east1 \
+      --repository=projects/brikz-ap/locations/southamerica-east1/connections/optin-github/repositories/contratos-back \
+      --branch-pattern='^master$' \
+      --build-config=cloudbuild.yaml \
+      --substitutions=_TAG='$SHORT_SHA' \
+      --service-account=projects/brikz-ap/serviceAccounts/contratos-build@brikz-ap.iam.gserviceaccount.com
+
+Reaproveita a conexão GitHub `optin-github` (já existente pro optin) — o
+GitHub App já cobre a org `brikzai` inteira, então registrar o repo
+`ap-back-contratos` não exigiu nenhuma autorização manual adicional (setup
+mais simples do que o previsto originalmente). Sem aprovação manual de
+build (sem `approvalConfig`), mesmo padrão do optin: qualquer push na
+`master` vai para o ar sozinho.
+
+Acompanhar: `gcloud builds list --region=southamerica-east1 --limit=5`
+
+Feito em 2026-09-04: conexão `optin-github` reaproveitada, repositório
+`contratos-back` registrado, trigger `contratos-deploy-master` criado —
+verificado sem `approvalConfig` (aprovação automática).
