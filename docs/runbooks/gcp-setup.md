@@ -56,3 +56,42 @@ Feito em 2026-09-04: as 3 contas criadas; `contratos-run@` com
 `roles/iam.serviceAccountUser` sobre `contratos-run@` — confirmado via
 `get-iam-policy` (não pela saída do `add-iam-policy-binding`, que mostra a
 policy inteira do projeto e não isola por membro).
+
+## 3. Banco do tenant (reaproveitando a instância `optin-pg`)
+
+Sem instância nova — `contratos` usa a mesma instância Cloud SQL do
+`optin-service` (`optin-pg`, `brikz-ap:southamerica-east1:optin-pg`), com um
+usuário e bancos próprios (design 2026-09-04 §2.1): um banco novo por
+tenant, `ap_<cnpj>_contratos` — nome deliberadamente diferente de
+`ap_<cnpj>` (usado pelo optin para o mesmo tenant) porque as tabelas
+`webhook_inbox`, `cerc_requisicao`, `dominio_arranjo` existem nos dois
+serviços com o mesmo nome; bancos diferentes na mesma instância são
+namespaces Postgres isolados, então não há colisão.
+
+    gcloud sql users create contratos_app --instance=optin-pg --password="<gerada, guardada só na sessão>"
+    gcloud sql databases create ap_<cnpj>_contratos --instance=optin-pg
+
+Conceder privilégios (não dá pra fazer só com `gcloud` — precisa de uma
+conexão SQL como admin): pelo **Cloud SQL Studio** do Console
+(`https://console.cloud.google.com/sql/instances/optin-pg/studio?project=brikz-ap`,
+conectado com uma conta com IAM no projeto, banco `ap_<cnpj>_contratos`):
+
+    GRANT ALL PRIVILEGES ON DATABASE ap_<cnpj>_contratos TO contratos_app;
+    GRANT ALL ON SCHEMA public TO contratos_app;
+
+`contratos_app` é único e reaproveitado por todos os tenants do contratos —
+só o banco muda por tenant, mesmo padrão de usuário único do `optin_app`.
+Onboarding de um novo tenant repete `gcloud sql databases create` + os dois
+`GRANT` acima (o usuário já existe depois da primeira vez).
+
+**Nota:** diferente do `optin_app` (que tem `CREATEDB` e por isso cria e é
+dono de cada banco de tenant sozinho, via `apps/tenants/provisioning.py`),
+`contratos_app` **não** tem `CREATEDB` — o banco é criado via
+`gcloud sql databases create` (API do Cloud SQL, não precisa de conexão
+SQL) e os privilégios são concedidos à parte. Privilégio mais restrito
+(só nos bancos que já existem), ao custo de precisar do Cloud SQL Studio
+(ou de outra conexão admin) a cada novo tenant.
+
+Feito em 2026-09-04: usuário `contratos_app` criado; banco
+`ap_38138785000136_contratos` criado; `GRANT ALL PRIVILEGES ON DATABASE` e
+`GRANT ALL ON SCHEMA public` aplicados via Cloud SQL Studio.
