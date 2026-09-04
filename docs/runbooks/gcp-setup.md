@@ -227,3 +227,33 @@ confirmado nos logs — `[Processor] webhook_inbox_id=... não encontrado ...
 condição permanentemente irrecuperável, confirmando entrega` (204), sem
 nenhum erro de OIDC. Confirma que a autenticação da push subscription
 está correta ponta a ponta.
+
+## 8. Cloud Scheduler — job diário de domínio de arranjo
+
+    SERVICE_URL="$(gcloud run services describe contratos-service --region southamerica-east1 --format='value(status.url)')"
+    gcloud scheduler jobs create http contratos-sincronizar-dominio-arranjo \
+      --location=southamerica-east1 \
+      --schedule="0 6 * * *" \
+      --uri="${SERVICE_URL}/api/v1/jobs/sincronizar-dominio-arranjo" \
+      --http-method=POST \
+      --oidc-service-account-email=contratos-pubsub-push@brikz-ap.iam.gserviceaccount.com \
+      --oidc-token-audience="https://contratos-service.internal/webhooks/contrato/processar"
+
+Mesma service account e mesma audiência da subscription do Pub/Sub (seção
+7) — `shared/pubsub_auth.py` só valida um par (audiência, e-mail) global,
+não diferencia a origem da chamada.
+
+**Pendência:** `_TENANTS_JOBS_PERIODICOS` (`apps/contratos/views.py`) é uma
+lista hardcoded no código-fonte — hoje só `12345678000199` (CNPJ de dev).
+Esse tenant **não** foi provisionado nesta infra (só `38138785000136`, o
+tenant real de homolog) — rodar o job hoje falha com `Secret
+TENANT_12345678000199_CONFIG_CONTRATOS not found`, um erro esperado dado
+esse descompasso, não um problema de infra. Onboardar um tenant real pro
+job diário exige adicionar o CNPJ nessa lista (código) e reimplantar.
+
+Testar manualmente: `gcloud scheduler jobs run contratos-sincronizar-dominio-arranjo --location=southamerica-east1`
+
+Feito em 2026-09-04: job criado, `state: ENABLED`. Disparo manual
+confirmou OIDC correto (chegou até a lógica de negócio, sem 401) — falhou
+depois por causa da pendência acima (`12345678000199` não provisionado),
+comportamento esperado e não bloqueante pra este runbook.
