@@ -139,6 +139,102 @@ def test_webhook_envelope_sem_campos_obrigatorios_retorna_400():
     assert response.status_code == 400
 
 
+def test_webhook_envelope_embrulhado_em_array_funciona_igual(publicados):
+    """SPEC-02 §5.2 documenta o envelope como objeto solto, mas o teste real
+    de conectividade do portal da CERC manda embrulhado num array de 1
+    elemento (achado em 2026-09-04 no agenda-service; confirmado no
+    contratos-service em 2026-09-05 pelos logs do Cloud Run)."""
+    envelope = _envelope("CTR-TESTE-WEBHOOK-ARRAY")
+    _limpar(envelope)
+    try:
+        response = Client().post(
+            URL, data=json.dumps([envelope]), content_type="application/json",
+            HTTP_AUTHORIZATION=_basic_auth_header(),
+        )
+        assert response.status_code == 202
+
+        h = hash_evento(envelope["tipoEvento"], envelope["evento"], envelope["dataHoraEvento"])
+        salvo = get_db(FINANCIADOR_TESTE).table("webhook_inbox").select("*").eq("hash_dedupe", h).execute()
+        assert len(salvo.data) == 1
+        assert salvo.data[0]["payload"] == envelope  # persiste o objeto, não o array
+    finally:
+        _limpar(envelope)
+
+
+def test_webhook_testecerc_sem_evento_retorna_202(publicados):
+    """testeCerc (SPEC-01 §4.4) é o ping de conectividade da CERC — não
+    carrega "evento". Corpo real capturado no Cloud Run:
+    [{"tipoEvento":"testeCerc","dataHoraEvento":"2026-09-04T21:12:41.97572909"}].
+    Qualquer outro tipoEvento continua exigindo os três campos."""
+    envelope = {"tipoEvento": "testeCerc", "dataHoraEvento": "2026-09-04T21:12:41.97572909"}
+    h = hash_evento(envelope["tipoEvento"], None, envelope["dataHoraEvento"])
+    get_db(FINANCIADOR_TESTE).table("webhook_inbox").delete().eq("hash_dedupe", h).execute()
+    try:
+        response = Client().post(
+            URL, data=json.dumps([envelope]), content_type="application/json",
+            HTTP_AUTHORIZATION=_basic_auth_header(),
+        )
+        assert response.status_code == 202
+
+        salvo = get_db(FINANCIADOR_TESTE).table("webhook_inbox").select("*").eq("hash_dedupe", h).execute()
+        assert len(salvo.data) == 1
+        assert salvo.data[0]["tipo_evento"] == "testeCerc"
+    finally:
+        get_db(FINANCIADOR_TESTE).table("webhook_inbox").delete().eq("hash_dedupe", h).execute()
+
+
+def test_webhook_corpo_real_da_cerc_testecerc_em_array_e_aceito(monkeypatch, publicados):
+    """Corpo bruto exatamente como o portal da CERC envia no teste de
+    conectividade (capturado nos logs do Cloud Run em 2026-09-04/05). Sem
+    banco: prova só a validação do envelope e o que vai para o insert."""
+    inseridos = []
+
+    class _Execute:
+        def __init__(self, data):
+            self._data = data
+
+        def execute(self):
+            inseridos.append(self._data)
+
+    class _Tabela:
+        def insert(self, data):
+            return _Execute(data)
+
+    class _Db:
+        def table(self, nome):
+            assert nome == "webhook_inbox"
+            return _Tabela()
+
+    monkeypatch.setattr(views, "get_db", lambda financiador_id: _Db())
+
+    corpo_real = b'[{"tipoEvento":"testeCerc","dataHoraEvento":"2026-09-04T21:12:41.97572909"}]'
+    response = Client().post(URL, data=corpo_real, content_type="application/json", HTTP_AUTHORIZATION=_basic_auth_header())
+
+    assert response.status_code == 202
+    assert len(inseridos) == 1
+    assert inseridos[0]["tipo_evento"] == "testeCerc"
+    assert inseridos[0]["payload"] == {"tipoEvento": "testeCerc", "dataHoraEvento": "2026-09-04T21:12:41.97572909"}
+    assert len(publicados) == 1
+
+
+def test_webhook_testecerc_sem_datahoraevento_retorna_400():
+    response = Client().post(
+        URL, data=json.dumps({"tipoEvento": "testeCerc"}), content_type="application/json",
+        HTTP_AUTHORIZATION=_basic_auth_header(),
+    )
+    assert response.status_code == 400
+
+
+def test_webhook_contrato_sem_evento_continua_400():
+    """A exceção do campo "evento" vale só para testeCerc — um evento de
+    contrato sem "evento" segue inválido."""
+    response = Client().post(
+        URL, data=json.dumps([{"tipoEvento": "contrato", "dataHoraEvento": "2026-09-04T21:12:41.97572909"}]),
+        content_type="application/json", HTTP_AUTHORIZATION=_basic_auth_header(),
+    )
+    assert response.status_code == 400
+
+
 def test_webhook_valido_persiste_no_inbox_e_publica(publicados):
     envelope = _envelope("CTR-TESTE-WEBHOOK-OK")
     _limpar(envelope)

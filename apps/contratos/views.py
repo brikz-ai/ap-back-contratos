@@ -137,14 +137,29 @@ def webhook_contrato(request, financiador_id: str):
         return JsonResponse({"erro": "autenticação inválida"}, status=401)
 
     try:
-        envelope = json.loads(request.body)
+        corpo = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"erro": "corpo não é JSON válido"}, status=400)
+
+    # SPEC-02 §5.2 documenta o envelope como objeto solto; o teste de
+    # conectividade real do portal da CERC manda embrulhado num array de 1
+    # elemento (confirmado nos logs do Cloud Run em 2026-09-05, mesmo achado
+    # do agenda-service em 2026-09-04) — aceita os dois formatos.
+    envelope = corpo[0] if isinstance(corpo, list) and corpo else corpo
 
     tipo_evento = envelope.get("tipoEvento") if isinstance(envelope, dict) else None
     data_hora_evento = envelope.get("dataHoraEvento") if isinstance(envelope, dict) else None
     evento = envelope.get("evento") if isinstance(envelope, dict) else None
-    if not tipo_evento or not data_hora_evento or evento is None:
+
+    # testeCerc (SPEC-01 §4.4): ping de conectividade da CERC, sem contrato
+    # real — não carrega "evento". Corpo real capturado:
+    # [{"tipoEvento":"testeCerc","dataHoraEvento":"2026-09-04T21:12:41.97572909"}].
+    # Para qualquer outro tipoEvento (em particular "contrato"), os três
+    # campos continuam obrigatórios.
+    if tipo_evento == "testeCerc":
+        if not data_hora_evento:
+            return JsonResponse({"erro": "envelope inválido: dataHoraEvento é obrigatório"}, status=400)
+    elif not tipo_evento or not data_hora_evento or evento is None:
         return JsonResponse(
             {"erro": "envelope inválido: tipoEvento, dataHoraEvento e evento são obrigatórios"}, status=400,
         )
