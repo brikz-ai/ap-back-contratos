@@ -228,6 +228,53 @@ condição permanentemente irrecuperável, confirmando entrega` (204), sem
 nenhum erro de OIDC. Confirma que a autenticação da push subscription
 está correta ponta a ponta.
 
+### 7.1 Permissão de publish esquecida (achado em produção, 2026-09-04/05)
+
+`contratos-run@` nunca recebeu `roles/pubsub.publisher` no tópico — o
+`webhook_contrato` grava em `webhook_inbox` com sucesso mas o publish no
+Pub/Sub falha silenciosamente (`shared/pubsub_client.py` nunca deixa isso
+virar exceção pro chamador, só loga). Um evento de teste (`smoke-test-001`,
+da Task 12 deste plano) ficou preso com `processado_em IS NULL` por causa
+disso. Corrigido:
+
+    gcloud pubsub topics add-iam-policy-binding contratos-webhook-inbox \
+      --member=serviceAccount:contratos-run@brikz-ap.iam.gserviceaccount.com \
+      --role=roles/pubsub.publisher
+
+Republicado manualmente o evento preso (`gcloud pubsub topics publish contratos-webhook-inbox --message='{"webhook_inbox_id": "<id>", "financiador_id": "<cnpj>"}'`) — processou e confirmou `contrato referencia_externa=smoke-test-001 não encontrado` corretamente (contrato de teste nunca existiu de verdade).
+
+### 7.2 Dead-letter queue (achado em produção, 2026-09-05)
+
+O caso acima revelou um problema maior: "contrato não encontrado" (diferente
+de "webhook_inbox_id não encontrado") é tratado como erro **retryable**
+(500, "deixando para nova entrega do Pub/Sub") — sem dead-letter policy, a
+subscription reentregava a cada poucos segundos, indefinidamente, gerando
+uma tempestade de retries. Corrigido com uma DLQ:
+
+    gcloud pubsub topics create contratos-webhook-inbox-dlq
+    PROJECT_NUMBER=$(gcloud projects describe brikz-ap --format="value(projectNumber)")
+    gcloud pubsub topics add-iam-policy-binding contratos-webhook-inbox-dlq \
+      --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com" \
+      --role=roles/pubsub.publisher
+    gcloud pubsub subscriptions add-iam-policy-binding contratos-webhook-inbox-push \
+      --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com" \
+      --role=roles/pubsub.subscriber
+    gcloud pubsub subscriptions update contratos-webhook-inbox-push \
+      --dead-letter-topic=contratos-webhook-inbox-dlq \
+      --max-delivery-attempts=5
+    gcloud pubsub subscriptions create contratos-webhook-inbox-dlq-sub --topic=contratos-webhook-inbox-dlq
+
+Depois de 5 tentativas, a mensagem vai para `contratos-webhook-inbox-dlq`
+em vez de reentregar pra sempre — `contratos-webhook-inbox-dlq-sub` existe
+só pra dar visibilidade (`gcloud pubsub subscriptions pull
+contratos-webhook-inbox-dlq-sub --auto-ack --limit=10`), sem consumidor
+automático. Mensagens na DLQ merecem investigação manual (webhook real da
+CERC que falhou 5x é bem mais sério que um teste manual).
+
+Purgado o evento `smoke-test-001` preso em loop com
+`gcloud pubsub subscriptions seek contratos-webhook-inbox-push --time=<agora>`
+antes deste fix — confirmado sem novas reentregas nos logs depois do seek.
+
 ## 8. Cloud Scheduler — job diário de domínio de arranjo
 
     SERVICE_URL="$(gcloud run services describe contratos-service --region southamerica-east1 --format='value(status.url)')"
