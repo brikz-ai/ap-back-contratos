@@ -313,3 +313,82 @@ def test_atualizar_status_pos_registro_grava_novo_status_e_protocolo():
         assert atualizado["documento_contratante"] == contrato["documento_contratante"]
     finally:
         get_db(FINANCIADOR_TESTE).table("contrato").delete().eq("id", contrato["id"]).execute()
+
+
+def test_listar_eventos_ordena_e_correlaciona_requisicoes():
+    """Eventos em ordem cronológica, cada um levando as requisições CERC
+    que o antecedem. correlacao_id é gravado como `referencia_externa` na
+    criação e `referencia_externa:<tipo>` nas operações pós-registro."""
+    from apps.contratos.contrato_repository import listar_eventos_do_contrato
+
+    referencia = "CTR-EVENTOS-REPO"
+    _limpar(referencia)
+    db = get_db(FINANCIADOR_TESTE)
+    payload = {
+        **_payload_validado(referencia), "garantias": [],
+        "identificacaoContratosAnteriores": [], "parcelas": [],
+    }
+    contrato = inserir_contrato_criado(
+        FINANCIADOR_TESTE, payload, status=state_machine.AGUARDANDO_WEBHOOK,
+        protocolo="proto-eventos", id_contrato_cerc="cerc-eventos",
+    )
+    contrato_id = contrato["id"]
+    base = datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
+    try:
+        db.table("cerc_requisicao").insert({
+            "id": str(uuid.uuid4()), "recurso": "/contratos",
+            "correlacao_id": referencia, "http_status": 207,
+            "request_body": {"tipoOperacao": "C"}, "response_body": {"ok": True},
+            "tentativa": 1, "criado_em": base.isoformat(),
+        }).execute()
+        db.table("contrato_evento").insert([
+            {"contrato_id": contrato_id, "tipo": "webhook_recebido",
+             "payload": {"a": 1}, "ocorrido_em": (base + timedelta(minutes=5)).isoformat()},
+            {"contrato_id": contrato_id, "tipo": "rejeicao_estrutural",
+             "payload": {"erros": []}, "ocorrido_em": (base + timedelta(minutes=1)).isoformat()},
+        ]).execute()
+
+        eventos = listar_eventos_do_contrato(FINANCIADOR_TESTE, contrato_id)
+
+        assert [e["tipo"] for e in eventos] == ["rejeicao_estrutural", "webhook_recebido"]
+        assert len(eventos[0]["requisicoes"]) == 1
+        assert eventos[0]["requisicoes"][0]["http_status"] == 207
+        assert eventos[1]["requisicoes"] == []
+    finally:
+        db.table("cerc_requisicao").delete().eq("correlacao_id", referencia).execute()
+        _limpar(referencia)
+
+
+def test_listar_eventos_requisicao_orfa_vira_entrada_propria():
+    """Uma requisição CERC anterior a qualquer evento (ex.: timeout de rede,
+    que não gera evento de domínio) precisa continuar visível."""
+    from apps.contratos.contrato_repository import listar_eventos_do_contrato
+
+    referencia = "CTR-EVENTOS-ORFA"
+    _limpar(referencia)
+    db = get_db(FINANCIADOR_TESTE)
+    payload = {
+        **_payload_validado(referencia), "garantias": [],
+        "identificacaoContratosAnteriores": [], "parcelas": [],
+    }
+    contrato = inserir_contrato_criado(
+        FINANCIADOR_TESTE, payload, status=state_machine.AGUARDANDO_WEBHOOK,
+        protocolo="proto-orfa", id_contrato_cerc="cerc-orfa",
+    )
+    try:
+        db.table("cerc_requisicao").insert({
+            "id": str(uuid.uuid4()), "recurso": "/contratos",
+            "correlacao_id": referencia, "http_status": None,
+            "request_body": {"tipoOperacao": "C"}, "response_body": None,
+            "tentativa": 1,
+            "criado_em": datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc).isoformat(),
+        }).execute()
+
+        eventos = listar_eventos_do_contrato(FINANCIADOR_TESTE, contrato["id"])
+
+        assert len(eventos) == 1
+        assert eventos[0]["tipo"] == "requisicao_cerc"
+        assert len(eventos[0]["requisicoes"]) == 1
+    finally:
+        db.table("cerc_requisicao").delete().eq("correlacao_id", referencia).execute()
+        _limpar(referencia)

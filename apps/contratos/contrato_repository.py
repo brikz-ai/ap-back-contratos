@@ -235,3 +235,74 @@ def buscar_contrato_detalhado(financiador_id: str, contrato_id: str) -> dict | N
     indicadores = db.table("indicador_consistencia").select("*").eq("contrato_id", contrato_id).execute().data
 
     return {**contrato, "garantias": garantias, "indicadores_consistencia": indicadores}
+
+
+# Operações que a CERC recebe com correlacao_id sufixado (views.py:736); a
+# criação usa a referência crua (views.py:605). Só "I" e "B" têm endpoint
+# hoje (views.py::inativar_contrato/baixar_contrato) — "P"/"R" existem em
+# state_machine.py mas não são alcançáveis ainda, por isso ficam de fora;
+# quando ganharem endpoint, entram aqui também. Enumerado em vez de LIKE:
+# `LIKE 'ref%'` casaria uma referência que é prefixo de outra.
+_SUFIXOS_CORRELACAO = ("", ":I", ":B")
+
+
+def listar_eventos_do_contrato(financiador_id: str, contrato_id: str) -> list[dict] | None:
+    """Timeline do contrato: linhas de `contrato_evento` em ordem cronológica,
+    cada uma carregando as requisições HTTP à CERC (`cerc_requisicao`) que a
+    antecedem. Devolve None quando o contrato não existe.
+
+    As duas tabelas não têm FK entre si — `cerc_requisicao` é gravada pelo
+    client HTTP (services/cerc/client.py), que não conhece o id do contrato,
+    e se correlaciona pelo `correlacao_id`. A associação por janela temporal
+    é aproximada de propósito: serve para depurar uma rejeição, não como
+    trilha de auditoria formal.
+
+    Requisições anteriores ao primeiro evento viram entradas próprias de tipo
+    `requisicao_cerc`, para que uma falha de rede — que não gera evento de
+    domínio nenhum — continue visível na tela.
+    """
+    db = get_db(financiador_id)
+    contrato = db.table("contrato").select("referencia_externa").eq("id", contrato_id).execute().data
+    if not contrato:
+        return None
+    referencia_externa = contrato[0]["referencia_externa"]
+
+    eventos = (
+        db.table("contrato_evento").select("*")
+        .eq("contrato_id", contrato_id).order("ocorrido_em").execute().data
+    )
+    # shared/cloudsql_client.py::QueryBuilder só tem .eq() (nenhum .in_() /
+    # OR) — uma query por sufixo, unidas e reordenadas aqui, em vez de um
+    # único IN.
+    requisicoes = sorted(
+        (
+            requisicao
+            for sufixo in _SUFIXOS_CORRELACAO
+            for requisicao in (
+                db.table("cerc_requisicao").select("*")
+                .eq("correlacao_id", f"{referencia_externa}{sufixo}").execute().data
+            )
+        ),
+        key=lambda r: str(r["criado_em"]),
+    )
+
+    timeline = [{**e, "requisicoes": []} for e in eventos]
+    orfas = []
+    for requisicao in requisicoes:
+        anterior = None
+        for entrada in timeline:
+            if str(entrada["ocorrido_em"]) >= str(requisicao["criado_em"]):
+                anterior = entrada
+                break
+        if anterior is None:
+            orfas.append(requisicao)
+        else:
+            anterior["requisicoes"].append(requisicao)
+
+    for requisicao in orfas:
+        timeline.append({
+            "tipo": "requisicao_cerc", "payload": {},
+            "ocorrido_em": requisicao["criado_em"], "requisicoes": [requisicao],
+        })
+
+    return sorted(timeline, key=lambda e: str(e["ocorrido_em"]))
