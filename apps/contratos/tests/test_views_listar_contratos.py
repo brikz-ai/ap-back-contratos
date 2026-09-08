@@ -160,6 +160,11 @@ def test_listar_filtra_por_documento_contratante():
         for ref, doc in ((ref_alvo, doc_alvo), (ref_outro, doc_outro)):
             payload = {
                 **_payload_minimo(ref), "documentoContratante": doc,
+                # `contrato` tem UNIQUE em (cnpj_participante,
+                # identificador_contrato) e _payload_minimo fixa o mesmo
+                # identificador para todos: sem derivar da referência, o
+                # segundo insert de um teste com dois contratos viola a chave.
+                "identificadorContrato": f"OP-{ref}",
                 "garantias": [], "identificacaoContratosAnteriores": [], "parcelas": [],
             }
             inserir_contrato_criado(
@@ -189,6 +194,10 @@ def test_listar_sem_filtro_preserva_comportamento_atual():
         for ref, doc in ((ref_1, "22751826000125"), (ref_2, "11222333000181")):
             payload = {
                 **_payload_minimo(ref), "documentoContratante": doc,
+                # Identificador derivado da referência pela mesma razão do
+                # teste de filtro acima: UNIQUE em (cnpj_participante,
+                # identificador_contrato).
+                "identificadorContrato": f"OP-{ref}",
                 "garantias": [], "identificacaoContratosAnteriores": [], "parcelas": [],
             }
             inserir_contrato_criado(

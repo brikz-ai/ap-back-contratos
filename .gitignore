@@ -2,6 +2,10 @@
 __pycache__/
 *.pyc
 .env
+# Cópias e backups do .env carregam as mesmas credenciais que ele; sem esta
+# linha um `git add -A` depois de salvar um .env.bak commita segredo de tenant.
+.env.bak*
+.env.local
 staticfiles/
 logs/
 *.pem
