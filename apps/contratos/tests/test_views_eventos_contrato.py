@@ -2,6 +2,7 @@
 de leitura, esta exige JWT: o corpo carrega request/response crus da CERC,
 que incluem ISPB, agência e conta do domicílio de pagamento."""
 import time
+import uuid
 
 import jwt as pyjwt
 import pytest
@@ -97,6 +98,11 @@ def test_contrato_inexistente_devolve_404(chave_privada):
     url = f"/api/v1/contratos/{FINANCIADOR_TESTE}/{UUID_INEXISTENTE}/eventos"
     resposta = Client().get(url, **_auth(chave_privada))
     assert resposta.status_code == 404
+    # A view tem dois caminhos para 404 (financiador não resolvível vs.
+    # contrato inexistente) — sem asserir o corpo, este teste passaria pelo
+    # caminho errado (o except genérico) e continuaria verde mesmo que o
+    # tratamento de `eventos is None` fosse removido.
+    assert resposta.json()["erro"] == "contrato não encontrado"
 
 
 def test_devolve_timeline_em_camelcase(chave_privada):
@@ -119,6 +125,46 @@ def test_devolve_timeline_em_camelcase(chave_privada):
         assert "ocorridoEm" in dados[0]
         assert dados[0]["payload"]["erros"][0]["codigo"] == "C07"
         assert dados[0]["requisicoes"] == []
+    finally:
+        _limpar(referencia)
+
+
+def test_devolve_requisicoes_cerc_em_camelcase(chave_privada):
+    """Único teste que exercita _requisicao_para_dto: os seis campos aqui
+    (requestBody/responseBody em particular) são os que carregam ISPB,
+    agência e conta do domicílio de pagamento — a razão desta rota ser
+    autenticada. Sem contrato_evento algum, a requisição vira "órfã" em
+    listar_eventos_do_contrato e ganha sua própria entrada sintética na
+    timeline (tipo="requisicao_cerc")."""
+    referencia = "CTR-EVENTOS-REQ"
+    contrato = _criar(referencia)
+    db = get_db(FINANCIADOR_TESTE)
+    try:
+        db.table("cerc_requisicao").insert({
+            "id": str(uuid.uuid4()),
+            "recurso": "/v15/contratos",
+            "correlacao_id": referencia,
+            "http_status": 207,
+            "request_body": {"referenciaExterna": referencia},
+            "response_body": {"status": "0"},
+            "tentativa": 1,
+        }).execute()
+
+        url = f"/api/v1/contratos/{FINANCIADOR_TESTE}/{contrato['id']}/eventos"
+        resposta = Client().get(url, **_auth(chave_privada))
+
+        assert resposta.status_code == 200
+        dados = resposta.json()["dados"]
+        assert len(dados) == 1
+        requisicoes = dados[0]["requisicoes"]
+        assert len(requisicoes) == 1
+        req = requisicoes[0]
+        assert req["recurso"] == "/v15/contratos"
+        assert req["httpStatus"] == 207
+        assert req["tentativa"] == 1
+        assert req["requestBody"] == {"referenciaExterna": referencia}
+        assert req["responseBody"] == {"status": "0"}
+        assert "criadoEm" in req
     finally:
         _limpar(referencia)
 

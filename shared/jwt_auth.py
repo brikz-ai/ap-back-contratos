@@ -58,6 +58,16 @@ def jwt_required(view_func):
             claims = validar_bearer_token(request.headers.get("Authorization", ""))
         except JwtAuthError as exc:
             return JsonResponse({"erro": "NAO_AUTENTICADO", "mensagem": exc.mensagem}, status=401)
+        except KeyError:
+            # IAM_JWT_PUBLIC_KEY/IAM_JWT_ISSUER ausentes do ambiente (deploy sem
+            # as variáveis configuradas no Cloud Run) chegam aqui como KeyError
+            # cru, não como JwtAuthError — sem este except, escapariam deste
+            # wrapper e virariam um 500 do Django. Com DEBUG=True (estado atual
+            # de homolog), isso é a página de debug completa devolvida a um
+            # chamador não autenticado. É má configuração do serviço, não erro
+            # do cliente nem informação que ele deva receber — por isso 503
+            # com corpo curto, sem detalhe interno.
+            return JsonResponse({"erro": "SERVICO_MAL_CONFIGURADO"}, status=503)
 
         financiador_id = claims.get("financiador_id")
         if not financiador_id or not re.fullmatch(r"\d{14}", str(financiador_id)):
@@ -66,7 +76,13 @@ def jwt_required(view_func):
             )
 
         request.jwt_claims = claims
-        request.financiador_id = financiador_id
+        # str() de propósito: um IdP que emita o claim como número JSON (não
+        # string) passa no fullmatch acima (que já compara contra str()), mas
+        # sem esta conversão o valor cru (int) ficaria em request.financiador_id
+        # — e toda comparação de tenant feita por uma view (`==` contra o
+        # financiador_id em string vindo da URL) falharia sempre, com um 403
+        # inexplicável.
+        request.financiador_id = str(financiador_id)
         return view_func(request, *args, **kwargs)
 
     return wrapper

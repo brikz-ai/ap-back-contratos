@@ -557,16 +557,29 @@ def eventos_contrato(request, financiador_id: str, contrato_id: str):
         return JsonResponse({"erro": "financiador do token não confere com o da URL"}, status=403)
 
     try:
-        eventos = listar_eventos_do_contrato(financiador_id, contrato_id)
+        # request.financiador_id, não a variável da URL: a comparação acima já
+        # garante que são iguais aqui, mas usar o claim torna o isolamento de
+        # tenant uma propriedade estrutural da chamada, em vez de depender de
+        # uma invariante mantida a quatro linhas de distância.
+        eventos = listar_eventos_do_contrato(request.financiador_id, contrato_id)
+        if eventos is None:
+            return JsonResponse({"erro": "contrato não encontrado"}, status=404)
+        corpo = {"dados": [_evento_para_dto(e) for e in eventos]}
     except Exception:
-        # Mesmo raciocínio de listar_contratos: financiador_id desconhecido faz
-        # get_db levantar RuntimeError puro. Não vaza se o tenant existe.
+        # Mesmo raciocínio de listar_contratos (financiador_id desconhecido faz
+        # get_db levantar RuntimeError puro — não vaza se o tenant existe), mas
+        # também cobre erro de mapeamento do DTO: sem isso, uma chave ausente em
+        # _evento_para_dto/_requisicao_para_dto virava 500 cru, e com DEBUG=True
+        # (homolog) isso é a página de debug do Django devolvendo, num erro, os
+        # próprios dados sensíveis que esta rota carrega (ISPB/agência/conta).
+        logger.exception(
+            "[EventosContrato] falha ao montar a timeline (financiador=%s, contrato=%s)",
+            financiador_id, contrato_id,
+        )
         return JsonResponse({"erro": "financiador não encontrado"}, status=404)
 
-    if eventos is None:
-        return JsonResponse({"erro": "contrato não encontrado"}, status=404)
-
-    return JsonResponse({"dados": [_evento_para_dto(e) for e in eventos]})
+    logger.info("[EventosContrato] timeline lida (financiador=%s, contrato=%s)", financiador_id, contrato_id)
+    return JsonResponse(corpo)
 
 
 def contratos(request, financiador_id: str):
