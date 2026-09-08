@@ -588,7 +588,19 @@ def criar_contrato(request, financiador_id: str):
     except (KeyError, TypeError) as erro:
         return JsonResponse({"erro": f"campo obrigatório ausente ou mal formado: {erro}"}, status=400)
 
-    payload_cerc = {**payload, "cnpjParticipante": financiador_id}
+    payload_cerc = {
+        **payload,
+        "cnpjParticipante": financiador_id,
+        # SPEC-02 (linhas 59/88): documentoContratante é ESTÁTICO (não
+        # atualizável) e especificado "sem formatação, zero-pad". O formulário
+        # do front não tem máscara, então o payload bruto pode chegar com
+        # pontuação; _operacao_pos_registro (inativar/baixar) já envia o valor
+        # NORMALIZADO lido de `contrato.documento_contratante` (persistido por
+        # inserir_contrato_criado). Sem normalizar aqui também, a criação e uma
+        # inativação/baixa posteriores do MESMO contrato falariam valores
+        # diferentes desse campo estático — rejeição 107807 garantida.
+        "documentoContratante": normalizar_documento(payload["documentoContratante"]),
+    }
     try:
         resultado = cerc_criar_contrato(financiador_id, payload_cerc, correlacao_id=referencia_externa)
     except CercApiError:
