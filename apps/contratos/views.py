@@ -20,7 +20,7 @@ from apps.contratos.contrato_repository import (
 )
 from apps.contratos.contrato_validation_orquestrador import validar_criacao_contrato
 from apps.contratos.dominio_arranjo_repository import CODIGOS_ARRANJO_VIGENTES, sincronizar_arranjos
-from apps.contratos.validation import ValidationError
+from apps.contratos.validation import ValidationError, normalizar_documento
 from apps.contratos.webhook_dedupe import hash_evento
 from apps.contratos.webhook_processor import (
     atualizacoes_contrato_do_evento,
@@ -482,6 +482,16 @@ def listar_contratos(request, financiador_id: str):
     ?status=, ?limit=, ?documentoContratante=."""
     status = request.GET.get("status") or None
     documento_contratante = request.GET.get("documentoContratante") or None
+    if documento_contratante:
+        # O front não tem máscara no formulário de criação, e o valor gravado
+        # por inserir_contrato_criado já é normalizado (contrato_repository.py)
+        # — sem normalizar aqui também, um documento pontuado na querystring
+        # (ex.: "22.751.826/0001-25") nunca bateria contra o que está no
+        # banco, e o filtro devolveria lista vazia silenciosamente.
+        try:
+            documento_contratante = normalizar_documento(documento_contratante)
+        except ValidationError as erro:
+            return JsonResponse({"codigo": erro.codigo, "erro": erro.mensagem}, status=400)
     limit_param = request.GET.get("limit")
     if limit_param:
         try:

@@ -1,5 +1,11 @@
--- A listagem passou a aceitar ?documentoContratante= (front monta a lista de
--- contratos dentro da ficha de um cliente). Sem este índice a consulta vira
--- scan da tabela inteira do tenant: os índices existentes são
--- (cnpj_participante, status) e (status), nenhum cobre o contratante.
-CREATE INDEX ON contrato (cnpj_participante, documento_contratante);
+-- A consulta que este índice serve é sempre "contratos deste contratante,
+-- mais recente primeiro" (?documentoContratante= da listagem — front monta a
+-- lista de contratos dentro da ficha de um cliente). Um índice composto só
+-- permite seek quando a coluna líder tem predicado de igualdade; liderar por
+-- cnpj_participante não serviria porque listar_contratos_do_financiador NUNCA
+-- filtra por essa coluna — o isolamento de tenant aqui é por banco separado
+-- via get_db(financiador_id), não por coluna (ver views.py, comentário de
+-- _operacao_pos_registro sobre onde o isolamento de fato acontece). Liderar
+-- por documento_contratante, seguido de enviado_em DESC, serve o filtro E a
+-- ordenação na mesma passada, sem sort adicional.
+CREATE INDEX ON contrato (documento_contratante, enviado_em DESC);

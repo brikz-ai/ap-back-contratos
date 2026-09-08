@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime, timezone
 
 from apps.contratos import state_machine
+from apps.contratos.validation import normalizar_documento
 from shared.cloudsql_client import get_db
 
 
@@ -94,7 +95,13 @@ def inserir_contrato_criado(
         "status": state_machine.ENVIANDO,
         "enviado_em": datetime.now(timezone.utc),
         "cnpj_participante": financiador_id,
-        "documento_contratante": payload_validado["documentoContratante"],
+        # Normalizado aqui (só neste valor gravado, não em payload_validado —
+        # esse dict não é usado para montar o envio à CERC em criar_contrato,
+        # que parte do payload bruto) porque o formulário do front não tem
+        # máscara: sem isso, "22.751.826/0001-25" grava com pontuação e o
+        # filtro ?documentoContratante= da listagem (que recebe o valor já
+        # normalizado) nunca casa contra esta linha.
+        "documento_contratante": normalizar_documento(payload_validado["documentoContratante"]),
         "cnpj_detentor": payload_validado["cnpjDetentor"],
         "tipo_efeito": payload_validado["tipoEfeito"],
         "modalidade_operacao": payload_validado["modalidadeOperacao"],

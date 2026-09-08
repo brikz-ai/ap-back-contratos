@@ -178,18 +178,52 @@ def test_listar_filtra_por_documento_contratante():
 
 
 def test_listar_sem_filtro_preserva_comportamento_atual():
-    ref = "CTR-FILTRO-SEM"
+    # Dois contratos com documentoContratante DIFERENTE: um único contrato não
+    # pegaria uma regressão em que o filtro passasse a ser aplicado indevidamente
+    # (ex.: um valor vazio virando um .eq("documento_contratante", "") que só
+    # por acaso ainda casa com o único registro do teste).
+    ref_1, ref_2 = "CTR-FILTRO-SEM-1", "CTR-FILTRO-SEM-2"
+    _limpar(ref_1)
+    _limpar(ref_2)
+    try:
+        for ref, doc in ((ref_1, "22751826000125"), (ref_2, "11222333000181")):
+            payload = {
+                **_payload_minimo(ref), "documentoContratante": doc,
+                "garantias": [], "identificacaoContratosAnteriores": [], "parcelas": [],
+            }
+            inserir_contrato_criado(
+                FINANCIADOR_TESTE, payload, status=state_machine.AGUARDANDO_WEBHOOK,
+                protocolo=f"proto-{ref}", id_contrato_cerc=f"cerc-{ref}",
+            )
+        response = Client().get(URL_LISTA)
+        assert response.status_code == 200
+        referencias = [c["referenciaExterna"] for c in response.json()["dados"]]
+        assert ref_1 in referencias
+        assert ref_2 in referencias
+    finally:
+        _limpar(ref_1)
+        _limpar(ref_2)
+
+
+def test_listar_filtra_por_documento_contratante_pontuado_na_criacao():
+    # C01 valida e normaliza o documento mas o retorno era descartado antes
+    # deste fix — o valor gravado vinha cru do payload. Como o formulário do
+    # front não tem máscara, alguém digitando com pontuação gravaria assim, e
+    # o filtro (que recebe/normaliza o valor SEM pontuação) nunca casaria.
+    ref = "CTR-FILTRO-PONTUADO"
+    doc_pontuado = "22.751.826/0001-25"
+    doc_normalizado = "22751826000125"
     _limpar(ref)
     try:
         payload = {
-            **_payload_minimo(ref), "documentoContratante": "22751826000125",
+            **_payload_minimo(ref), "documentoContratante": doc_pontuado,
             "garantias": [], "identificacaoContratosAnteriores": [], "parcelas": [],
         }
         inserir_contrato_criado(
             FINANCIADOR_TESTE, payload, status=state_machine.AGUARDANDO_WEBHOOK,
-            protocolo="proto-sem", id_contrato_cerc="cerc-sem",
+            protocolo="proto-pontuado", id_contrato_cerc="cerc-pontuado",
         )
-        response = Client().get(URL_LISTA)
+        response = Client().get(f"{URL_LISTA}?documentoContratante={doc_normalizado}")
         assert response.status_code == 200
         assert ref in [c["referenciaExterna"] for c in response.json()["dados"]]
     finally:
