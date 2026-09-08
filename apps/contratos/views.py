@@ -16,6 +16,7 @@ from apps.contratos.contrato_repository import (
     buscar_contrato_por_referencia,
     inserir_contrato_criado,
     listar_contratos_do_financiador,
+    listar_eventos_do_contrato,
     remover_contrato_rejeitado,
 )
 from apps.contratos.contrato_validation_orquestrador import validar_criacao_contrato
@@ -35,6 +36,7 @@ from services.cerc.client import (
 )
 from shared import pubsub_client
 from shared.cloudsql_client import get_db
+from shared.jwt_auth import jwt_required
 from shared.pubsub_auth import verificar_push_oidc
 from shared.tenant_config import get_tenant_config
 
@@ -518,6 +520,53 @@ def listar_contratos(request, financiador_id: str):
         # 500, e não vaza se o tenant existe ou por que a resolução falhou.
         return JsonResponse({"erro": "financiador não encontrado"}, status=404)
     return JsonResponse({"dados": [_contrato_para_dto(c) for c in contratos]})
+
+
+def _requisicao_para_dto(requisicao: dict) -> dict:
+    return {
+        "recurso": requisicao["recurso"],
+        "httpStatus": requisicao["http_status"],
+        "tentativa": requisicao["tentativa"],
+        "requestBody": requisicao["request_body"],
+        "responseBody": requisicao["response_body"],
+        "criadoEm": requisicao["criado_em"],
+    }
+
+
+def _evento_para_dto(evento: dict) -> dict:
+    return {
+        "tipo": evento["tipo"],
+        "ocorridoEm": evento["ocorrido_em"],
+        "payload": evento["payload"],
+        "requisicoes": [_requisicao_para_dto(r) for r in evento["requisicoes"]],
+    }
+
+
+@jwt_required
+@require_GET
+def eventos_contrato(request, financiador_id: str, contrato_id: str):
+    """GET /api/v1/contratos/<financiador_id>/<contrato_id>/eventos — timeline
+    do contrato para a aba de histórico do front.
+
+    Única rota de leitura deste serviço com JWT: o corpo devolve os
+    request/response crus trocados com a CERC, que carregam ISPB, agência e
+    conta do domicílio de pagamento. O financiador do claim manda — o da URL
+    só é aceito quando coincide.
+    """
+    if request.financiador_id != financiador_id:
+        return JsonResponse({"erro": "financiador do token não confere com o da URL"}, status=403)
+
+    try:
+        eventos = listar_eventos_do_contrato(financiador_id, contrato_id)
+    except Exception:
+        # Mesmo raciocínio de listar_contratos: financiador_id desconhecido faz
+        # get_db levantar RuntimeError puro. Não vaza se o tenant existe.
+        return JsonResponse({"erro": "financiador não encontrado"}, status=404)
+
+    if eventos is None:
+        return JsonResponse({"erro": "contrato não encontrado"}, status=404)
+
+    return JsonResponse({"dados": [_evento_para_dto(e) for e in eventos]})
 
 
 def contratos(request, financiador_id: str):
