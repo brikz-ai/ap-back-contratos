@@ -479,8 +479,9 @@ def detalhar_contrato(request, financiador_id: str, contrato_id: str):
 def listar_contratos(request, financiador_id: str):
     """GET /api/v1/contratos/<financiador_id> — lista os contratos do
     financiador, mais recente primeiro. Filtros opcionais via querystring:
-    ?status=, ?limit=."""
+    ?status=, ?limit=, ?documentoContratante=."""
     status = request.GET.get("status") or None
+    documento_contratante = request.GET.get("documentoContratante") or None
     limit_param = request.GET.get("limit")
     if limit_param:
         try:
@@ -496,7 +497,10 @@ def listar_contratos(request, financiador_id: str):
     else:
         limit = DEFAULT_LISTAGEM_LIMIT
     try:
-        contratos = listar_contratos_do_financiador(financiador_id, status=status, limit=limit)
+        contratos = listar_contratos_do_financiador(
+            financiador_id, status=status, limit=limit,
+            documento_contratante=documento_contratante,
+        )
     except Exception:
         # Mesmo raciocínio de _autenticado/detalhar_contrato: financiador_id
         # desconhecido faz get_db (via get_tenant_config) levantar um

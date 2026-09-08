@@ -149,3 +149,70 @@ def test_listar_contratos_limit_aplica_no_resultado():
             contrato = buscar_contrato_por_referencia(FINANCIADOR_TESTE, referencia_externa)
             if contrato:
                 remover_contrato_rejeitado(FINANCIADOR_TESTE, contrato["id"])
+
+
+def test_listar_filtra_por_documento_contratante():
+    ref_alvo, ref_outro = "CTR-FILTRO-ALVO", "CTR-FILTRO-OUTRO"
+    doc_alvo, doc_outro = "22751826000125", "11222333000181"
+    _limpar(ref_alvo)
+    _limpar(ref_outro)
+    try:
+        for ref, doc in ((ref_alvo, doc_alvo), (ref_outro, doc_outro)):
+            payload = {
+                **_payload_minimo(ref), "documentoContratante": doc,
+                "garantias": [], "identificacaoContratosAnteriores": [], "parcelas": [],
+            }
+            inserir_contrato_criado(
+                FINANCIADOR_TESTE, payload, status=state_machine.AGUARDANDO_WEBHOOK,
+                protocolo=f"proto-{ref}", id_contrato_cerc=f"cerc-{ref}",
+            )
+
+        response = Client().get(f"{URL_LISTA}?documentoContratante={doc_alvo}")
+        assert response.status_code == 200
+        referencias = [c["referenciaExterna"] for c in response.json()["dados"]]
+        assert ref_alvo in referencias
+        assert ref_outro not in referencias
+    finally:
+        _limpar(ref_alvo)
+        _limpar(ref_outro)
+
+
+def test_listar_sem_filtro_preserva_comportamento_atual():
+    ref = "CTR-FILTRO-SEM"
+    _limpar(ref)
+    try:
+        payload = {
+            **_payload_minimo(ref), "documentoContratante": "22751826000125",
+            "garantias": [], "identificacaoContratosAnteriores": [], "parcelas": [],
+        }
+        inserir_contrato_criado(
+            FINANCIADOR_TESTE, payload, status=state_machine.AGUARDANDO_WEBHOOK,
+            protocolo="proto-sem", id_contrato_cerc="cerc-sem",
+        )
+        response = Client().get(URL_LISTA)
+        assert response.status_code == 200
+        assert ref in [c["referenciaExterna"] for c in response.json()["dados"]]
+    finally:
+        _limpar(ref)
+
+
+def test_listar_filtro_combina_com_status():
+    ref = "CTR-FILTRO-STATUS"
+    doc = "22751826000125"
+    _limpar(ref)
+    try:
+        payload = {
+            **_payload_minimo(ref), "documentoContratante": doc,
+            "garantias": [], "identificacaoContratosAnteriores": [], "parcelas": [],
+        }
+        inserir_contrato_criado(
+            FINANCIADOR_TESTE, payload, status=state_machine.AGUARDANDO_WEBHOOK,
+            protocolo="proto-status", id_contrato_cerc="cerc-status",
+        )
+        casa = Client().get(f"{URL_LISTA}?documentoContratante={doc}&status={state_machine.AGUARDANDO_WEBHOOK}")
+        assert ref in [c["referenciaExterna"] for c in casa.json()["dados"]]
+
+        nao_casa = Client().get(f"{URL_LISTA}?documentoContratante={doc}&status={state_machine.REGISTRADO}")
+        assert ref not in [c["referenciaExterna"] for c in nao_casa.json()["dados"]]
+    finally:
+        _limpar(ref)
