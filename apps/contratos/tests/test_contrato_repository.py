@@ -392,3 +392,47 @@ def test_listar_eventos_requisicao_orfa_vira_entrada_propria():
     finally:
         db.table("cerc_requisicao").delete().eq("correlacao_id", referencia).execute()
         _limpar(referencia)
+
+
+def test_listar_eventos_requisicao_entre_dois_eventos_vai_para_o_posterior():
+    """A parte central da semântica: uma requisição entre dois eventos não
+    fica com o anterior (ela não o antecede) — vai para o primeiro evento
+    cujo ocorrido_em é >= o criado_em dela, ou seja, o evento POSTERIOR."""
+    from apps.contratos.contrato_repository import listar_eventos_do_contrato
+
+    referencia = "CTR-EVENTOS-ENTRE"
+    _limpar(referencia)
+    db = get_db(FINANCIADOR_TESTE)
+    payload = {
+        **_payload_validado(referencia), "garantias": [],
+        "identificacaoContratosAnteriores": [], "parcelas": [],
+    }
+    contrato = inserir_contrato_criado(
+        FINANCIADOR_TESTE, payload, status=state_machine.AGUARDANDO_WEBHOOK,
+        protocolo="proto-entre", id_contrato_cerc="cerc-entre",
+    )
+    contrato_id = contrato["id"]
+    base = datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
+    try:
+        db.table("contrato_evento").insert([
+            {"contrato_id": contrato_id, "tipo": "evento_anterior",
+             "payload": {}, "ocorrido_em": (base + timedelta(minutes=1)).isoformat()},
+            {"contrato_id": contrato_id, "tipo": "evento_posterior",
+             "payload": {}, "ocorrido_em": (base + timedelta(minutes=10)).isoformat()},
+        ]).execute()
+        db.table("cerc_requisicao").insert({
+            "id": str(uuid.uuid4()), "recurso": "/contratos",
+            "correlacao_id": referencia, "http_status": 207,
+            "request_body": {"tipoOperacao": "C"}, "response_body": {"ok": True},
+            "tentativa": 1, "criado_em": (base + timedelta(minutes=5)).isoformat(),
+        }).execute()
+
+        eventos = listar_eventos_do_contrato(FINANCIADOR_TESTE, contrato_id)
+
+        assert [e["tipo"] for e in eventos] == ["evento_anterior", "evento_posterior"]
+        assert eventos[0]["requisicoes"] == []
+        assert len(eventos[1]["requisicoes"]) == 1
+        assert eventos[1]["requisicoes"][0]["http_status"] == 207
+    finally:
+        db.table("cerc_requisicao").delete().eq("correlacao_id", referencia).execute()
+        _limpar(referencia)

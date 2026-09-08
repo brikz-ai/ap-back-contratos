@@ -274,6 +274,14 @@ def listar_eventos_do_contrato(financiador_id: str, contrato_id: str) -> list[di
     # shared/cloudsql_client.py::QueryBuilder só tem .eq() (nenhum .in_() /
     # OR) — uma query por sufixo, unidas e reordenadas aqui, em vez de um
     # único IN.
+    #
+    # `ocorrido_em`/`criado_em` chegam como `datetime` timezone-aware direto
+    # do driver (_exec_select devolve dict(r._mapping), sem serializar) —
+    # por isso as comparações abaixo são entre datetimes, sem `str()`. Uma
+    # coerção pra string aqui não travaria com TypeError se algum dia um dos
+    # lados chegasse como ISO já serializado; ela ordenaria errado em
+    # silêncio (a tabela ASCII só faz `.`/`+`/`-` ordenarem "certo" por
+    # coincidência).
     requisicoes = sorted(
         (
             requisicao
@@ -283,21 +291,21 @@ def listar_eventos_do_contrato(financiador_id: str, contrato_id: str) -> list[di
                 .eq("correlacao_id", f"{referencia_externa}{sufixo}").execute().data
             )
         ),
-        key=lambda r: str(r["criado_em"]),
+        key=lambda r: r["criado_em"],
     )
 
     timeline = [{**e, "requisicoes": []} for e in eventos]
     orfas = []
     for requisicao in requisicoes:
-        anterior = None
+        proximo_evento = None
         for entrada in timeline:
-            if str(entrada["ocorrido_em"]) >= str(requisicao["criado_em"]):
-                anterior = entrada
+            if entrada["ocorrido_em"] >= requisicao["criado_em"]:
+                proximo_evento = entrada
                 break
-        if anterior is None:
+        if proximo_evento is None:
             orfas.append(requisicao)
         else:
-            anterior["requisicoes"].append(requisicao)
+            proximo_evento["requisicoes"].append(requisicao)
 
     for requisicao in orfas:
         timeline.append({
@@ -305,4 +313,4 @@ def listar_eventos_do_contrato(financiador_id: str, contrato_id: str) -> list[di
             "ocorrido_em": requisicao["criado_em"], "requisicoes": [requisicao],
         })
 
-    return sorted(timeline, key=lambda e: str(e["ocorrido_em"]))
+    return sorted(timeline, key=lambda e: e["ocorrido_em"])
