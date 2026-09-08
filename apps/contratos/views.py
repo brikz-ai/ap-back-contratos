@@ -562,21 +562,35 @@ def eventos_contrato(request, financiador_id: str, contrato_id: str):
         # tenant uma propriedade estrutural da chamada, em vez de depender de
         # uma invariante mantida a quatro linhas de distância.
         eventos = listar_eventos_do_contrato(request.financiador_id, contrato_id)
-        if eventos is None:
-            return JsonResponse({"erro": "contrato não encontrado"}, status=404)
-        corpo = {"dados": [_evento_para_dto(e) for e in eventos]}
     except Exception:
-        # Mesmo raciocínio de listar_contratos (financiador_id desconhecido faz
-        # get_db levantar RuntimeError puro — não vaza se o tenant existe), mas
-        # também cobre erro de mapeamento do DTO: sem isso, uma chave ausente em
-        # _evento_para_dto/_requisicao_para_dto virava 500 cru, e com DEBUG=True
-        # (homolog) isso é a página de debug do Django devolvendo, num erro, os
-        # próprios dados sensíveis que esta rota carrega (ISPB/agência/conta).
+        # Mesmo raciocínio de listar_contratos: financiador_id desconhecido faz
+        # get_db levantar RuntimeError puro. Não vaza se o tenant existe.
         logger.exception(
-            "[EventosContrato] falha ao montar a timeline (financiador=%s, contrato=%s)",
+            "[EventosContrato] falha ao resolver o financiador (financiador=%s, contrato=%s)",
             financiador_id, contrato_id,
         )
         return JsonResponse({"erro": "financiador não encontrado"}, status=404)
+
+    if eventos is None:
+        return JsonResponse({"erro": "contrato não encontrado"}, status=404)
+
+    try:
+        corpo = {"dados": [_evento_para_dto(e) for e in eventos]}
+    except Exception:
+        # Categoria própria, separada da falha de acesso a dados acima: aqui o
+        # financiador e o contrato já foram resolvidos com sucesso — uma falha
+        # neste ponto é bug de mapeamento do DTO (chave ausente em
+        # _evento_para_dto/_requisicao_para_dto), não financiador/contrato
+        # inexistente. Devolver a mesma mensagem do bloco acima afirmaria uma
+        # causa falsa a quem depura pela resposta. 500 genérico e sem detalhe
+        # interno — a causa real fica só no log, nunca no corpo (a rota
+        # carrega ISPB/agência/conta; com DEBUG=True em homolog, um 500 cru
+        # aqui viraria a página de debug do Django expondo esses dados).
+        logger.exception(
+            "[EventosContrato] falha ao montar o DTO da timeline (financiador=%s, contrato=%s)",
+            financiador_id, contrato_id,
+        )
+        return JsonResponse({"erro": "falha ao montar a resposta"}, status=500)
 
     logger.info("[EventosContrato] timeline lida (financiador=%s, contrato=%s)", financiador_id, contrato_id)
     return JsonResponse(corpo)

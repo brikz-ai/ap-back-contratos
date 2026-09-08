@@ -1,5 +1,6 @@
 """Testes do jwt_auth portado do agenda-service. Par RSA gerado em memória:
 sem rede, sem banco, sem segredo de ambiente."""
+import json
 import time
 
 import jwt as pyjwt
@@ -93,3 +94,59 @@ def test_decorador_expoe_financiador_id_na_request(chaves):
     resposta = view(RequestFactory().get("/x", HTTP_AUTHORIZATION=f"Bearer {token}"))
     assert resposta.status_code == 200
     assert capturado["financiador_id"] == FINANCIADOR
+
+
+def test_decorador_converte_financiador_id_numerico_para_str(chaves):
+    # Um IdP que emita o claim como número JSON (sem aspas) ainda precisa
+    # resultar num request.financiador_id comparável por `==` com o valor
+    # (sempre string) vindo da URL — só checar o valor sem checar o tipo não
+    # fecharia o caso: `12345678000199 == "12345678000199"` é False em Python.
+    capturado = {}
+
+    @jwt_required
+    def view(request):
+        capturado["financiador_id"] = request.financiador_id
+        return JsonResponse({"ok": True})
+
+    token = _token(chaves, financiador_id=int(FINANCIADOR))
+    resposta = view(RequestFactory().get("/x", HTTP_AUTHORIZATION=f"Bearer {token}"))
+    assert resposta.status_code == 200
+    assert capturado["financiador_id"] == FINANCIADOR
+    assert isinstance(capturado["financiador_id"], str)
+
+
+def test_decorador_devolve_503_sem_vazar_detalhe_quando_public_key_ausente(chaves, monkeypatch):
+    monkeypatch.delenv("IAM_JWT_PUBLIC_KEY", raising=False)
+
+    @jwt_required
+    def view(request):
+        return JsonResponse({"ok": True})
+
+    resposta = view(RequestFactory().get("/x", HTTP_AUTHORIZATION="Bearer qualquer-coisa"))
+    assert resposta.status_code == 503
+    # Corpo exato — sem stack trace, sem nome de variável de ambiente, sem
+    # detalhe interno. O serviço está mal configurado; isso não é erro do
+    # cliente nem informação que ele deva receber.
+    assert json.loads(resposta.content) == {"erro": "SERVICO_MAL_CONFIGURADO"}
+
+    # Sem header, a ausência de CREDENCIAL DO CLIENTE é o que pesa: 401, não
+    # 503 — a validação do header acontece antes de qualquer leitura de
+    # variável de ambiente, então a má configuração do servidor nem chega a
+    # ser alcançada.
+    resposta_sem_header = view(RequestFactory().get("/x"))
+    assert resposta_sem_header.status_code == 401
+
+
+def test_decorador_devolve_503_sem_vazar_detalhe_quando_issuer_ausente(chaves, monkeypatch):
+    monkeypatch.delenv("IAM_JWT_ISSUER", raising=False)
+
+    @jwt_required
+    def view(request):
+        return JsonResponse({"ok": True})
+
+    resposta = view(RequestFactory().get("/x", HTTP_AUTHORIZATION="Bearer qualquer-coisa"))
+    assert resposta.status_code == 503
+    assert json.loads(resposta.content) == {"erro": "SERVICO_MAL_CONFIGURADO"}
+
+    resposta_sem_header = view(RequestFactory().get("/x"))
+    assert resposta_sem_header.status_code == 401
