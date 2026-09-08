@@ -1,6 +1,10 @@
 from django.urls import path, re_path
 from . import views
 
+# Assimetria de autenticação: /eventos é a única rota autenticada (@jwt_required)
+# hoje, porque devolve os request/response crus trocados com a CERC (ISPB,
+# agência, conta). As demais de leitura (contratos, detalhe) e as de
+# inativar/baixar seguem abertas — pendência conhecida, não decisão de projeto.
 urlpatterns = [
     path("health", views.health),
     re_path(r"^webhooks/contrato/(?P<financiador_id>\d{14})$", views.webhook_contrato),

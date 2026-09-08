@@ -394,6 +394,49 @@ def test_listar_eventos_requisicao_orfa_vira_entrada_propria():
         _limpar(referencia)
 
 
+def test_listar_eventos_requisicao_posterior_ao_ultimo_evento_vira_orfa():
+    """O que distingue as duas semânticas: com evento(s) na timeline, a órfã é
+    a requisição POSTERIOR ao último evento (não há evento posterior a ela a
+    que se juntar), e o evento anterior a ela NÃO a recebe. É este o estado de
+    uma inativação submetida cujo webhook ainda não chegou."""
+    from apps.contratos.contrato_repository import listar_eventos_do_contrato
+
+    referencia = "CTR-EVENTOS-ORFA-POSTERIOR"
+    _limpar(referencia)
+    db = get_db(FINANCIADOR_TESTE)
+    payload = {
+        **_payload_validado(referencia), "garantias": [],
+        "identificacaoContratosAnteriores": [], "parcelas": [],
+    }
+    contrato = inserir_contrato_criado(
+        FINANCIADOR_TESTE, payload, status=state_machine.AGUARDANDO_WEBHOOK,
+        protocolo="proto-orfa-post", id_contrato_cerc="cerc-orfa-post",
+    )
+    contrato_id = contrato["id"]
+    base = datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
+    try:
+        db.table("contrato_evento").insert({
+            "contrato_id": contrato_id, "tipo": "webhook_recebido",
+            "payload": {"a": 1}, "ocorrido_em": base.isoformat(),
+        }).execute()
+        db.table("cerc_requisicao").insert({
+            "id": str(uuid.uuid4()), "recurso": "/contratos",
+            "correlacao_id": f"{referencia}:I", "http_status": 207,
+            "request_body": {"tipoOperacao": "I"}, "response_body": {"ok": True},
+            "tentativa": 1, "criado_em": (base + timedelta(minutes=5)).isoformat(),
+        }).execute()
+
+        eventos = listar_eventos_do_contrato(FINANCIADOR_TESTE, contrato_id)
+
+        assert [e["tipo"] for e in eventos] == ["webhook_recebido", "requisicao_cerc"]
+        assert eventos[0]["requisicoes"] == []
+        assert len(eventos[1]["requisicoes"]) == 1
+        assert eventos[1]["requisicoes"][0]["request_body"] == {"tipoOperacao": "I"}
+    finally:
+        db.table("cerc_requisicao").delete().eq("correlacao_id", f"{referencia}:I").execute()
+        _limpar(referencia)
+
+
 def test_listar_eventos_requisicao_entre_dois_eventos_vai_para_o_posterior():
     """A parte central da semântica: uma requisição entre dois eventos não
     fica com o anterior (ela não o antecede) — vai para o primeiro evento

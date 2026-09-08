@@ -92,6 +92,10 @@ def test_financiador_do_claim_divergente_devolve_403(chave_privada):
     url = f"/api/v1/contratos/{FINANCIADOR_TESTE}/{UUID_INEXISTENTE}/eventos"
     resposta = Client().get(url, **_auth(chave_privada, financiador_id=OUTRO_FINANCIADOR))
     assert resposta.status_code == 403
+    # Formato das recusas de shared/jwt_auth.py: `erro` é código curto (o front
+    # o usa como código), `mensagem` é o texto legível.
+    assert resposta.json()["erro"] == "FINANCIADOR_DIVERGENTE"
+    assert resposta.json()["mensagem"]
 
 
 def test_contrato_inexistente_devolve_404(chave_privada):

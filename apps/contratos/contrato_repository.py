@@ -237,8 +237,9 @@ def buscar_contrato_detalhado(financiador_id: str, contrato_id: str) -> dict | N
     return {**contrato, "garantias": garantias, "indicadores_consistencia": indicadores}
 
 
-# Operações que a CERC recebe com correlacao_id sufixado (views.py:736); a
-# criação usa a referência crua (views.py:605). Só "I" e "B" têm endpoint
+# Operações que a CERC recebe com correlacao_id sufixado
+# (views.py:830, _operacao_pos_registro); a criação usa a referência crua
+# (views.py:699, criar_contrato). Só "I" e "B" têm endpoint
 # hoje (views.py::inativar_contrato/baixar_contrato) — "P"/"R" existem em
 # state_machine.py mas não são alcançáveis ainda, por isso ficam de fora;
 # quando ganharem endpoint, entram aqui também. Enumerado em vez de LIKE:
@@ -257,9 +258,19 @@ def listar_eventos_do_contrato(financiador_id: str, contrato_id: str) -> list[di
     é aproximada de propósito: serve para depurar uma rejeição, não como
     trilha de auditoria formal.
 
-    Requisições anteriores ao primeiro evento viram entradas próprias de tipo
-    `requisicao_cerc`, para que uma falha de rede — que não gera evento de
-    domínio nenhum — continue visível na tela.
+    Cada requisição é anexada ao PRIMEIRO evento cujo `ocorrido_em` é >= o
+    `criado_em` dela — o evento POSTERIOR a ela, portanto. A requisição HTTP é
+    o que causa o evento, então pertence a ele. São as requisições posteriores
+    ao ÚLTIMO evento (não as anteriores ao primeiro) que sobram sem evento a
+    que se juntar e viram entradas próprias de tipo `requisicao_cerc`, para
+    que uma falha de rede — que não gera evento de domínio nenhum — continue
+    visível na tela.
+
+    Consequência observável ao depurar: a requisição de criação aparece como
+    entrada órfã enquanto o webhook não chegou, e passa para dentro da entrada
+    do webhook quando ele chega. A timeline se reorganiza sozinha entre duas
+    leituras sem que nada tenha sido reprocessado — não é bug nem perda da
+    entrada anterior.
     """
     db = get_db(financiador_id)
     contrato = db.table("contrato").select("referencia_externa").eq("id", contrato_id).execute().data

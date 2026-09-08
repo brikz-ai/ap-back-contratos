@@ -527,6 +527,11 @@ def _requisicao_para_dto(requisicao: dict) -> dict:
         "recurso": requisicao["recurso"],
         "httpStatus": requisicao["http_status"],
         "tentativa": requisicao["tentativa"],
+        # Sem isto o bloco de diagnóstico do front fica ilegível: `recurso` é o
+        # mesmo caminho na criação, na inativação e na baixa, e o sufixo do
+        # correlacao_id é o único campo que distingue qual operação gerou a
+        # linha. Não é dado bancário — não amplia o que a rota já expõe.
+        "correlacaoId": requisicao["correlacao_id"],
         "requestBody": requisicao["request_body"],
         "responseBody": requisicao["response_body"],
         "criadoEm": requisicao["criado_em"],
@@ -542,6 +547,10 @@ def _evento_para_dto(evento: dict) -> dict:
     }
 
 
+# @jwt_required ACIMA de @require_GET, ao contrário do resto do serviço: nesta
+# ordem um POST sem token recebe 401, e não o 405 (com Allow: GET) que a ordem
+# inversa devolveria — a recusa por método não conta ao anônimo quais verbos a
+# rota atende.
 @jwt_required
 @require_GET
 def eventos_contrato(request, financiador_id: str, contrato_id: str):
@@ -554,7 +563,12 @@ def eventos_contrato(request, financiador_id: str, contrato_id: str):
     só é aceito quando coincide.
     """
     if request.financiador_id != financiador_id:
-        return JsonResponse({"erro": "financiador do token não confere com o da URL"}, status=403)
+        # Mesmo formato das recusas de shared/jwt_auth.py (`erro` é código
+        # curto, `mensagem` é o texto legível): o front usa `erro` como código.
+        return JsonResponse(
+            {"erro": "FINANCIADOR_DIVERGENTE", "mensagem": "financiador do token não confere com o da URL"},
+            status=403,
+        )
 
     try:
         # request.financiador_id, não a variável da URL: a comparação acima já
@@ -576,6 +590,10 @@ def eventos_contrato(request, financiador_id: str, contrato_id: str):
 
     try:
         corpo = {"dados": [_evento_para_dto(e) for e in eventos]}
+        # A serialização dentro do guarda, não depois dele: é ela que percorre
+        # o corpo de verdade, e um TypeError de encoder aqui fora viraria o 500
+        # cru que este bloco existe justamente para impedir.
+        resposta = JsonResponse(corpo)
     except Exception:
         # Categoria própria, separada da falha de acesso a dados acima: aqui o
         # financiador e o contrato já foram resolvidos com sucesso — uma falha
@@ -593,7 +611,7 @@ def eventos_contrato(request, financiador_id: str, contrato_id: str):
         return JsonResponse({"erro": "falha ao montar a resposta"}, status=500)
 
     logger.info("[EventosContrato] timeline lida (financiador=%s, contrato=%s)", financiador_id, contrato_id)
-    return JsonResponse(corpo)
+    return resposta
 
 
 def contratos(request, financiador_id: str):
