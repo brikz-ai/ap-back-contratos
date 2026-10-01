@@ -46,13 +46,13 @@ steps:
       # porque PUBSUB_PUSH_INVOKER_SA é um e-mail de service account, que
       # também contém '@'. CORS_ALLOWED_ORIGINS pode ter vírgulas, daí não
       # dá pra usar o separador default.
-      - --set-env-vars=^|^ENVIRONMENT=${_ENVIRONMENT}|GOOGLE_CLOUD_PROJECT=$PROJECT_ID|ALLOWED_HOSTS=*|CORS_ALLOWED_ORIGINS=${_CORS_ALLOWED_ORIGINS}|CERC_AUTH_URL=${_CERC_AUTH_URL}|CERC_API_BASE_URL=${_CERC_API_BASE_URL}|PUBSUB_PUSH_AUDIENCE=${_PUBSUB_PUSH_AUDIENCE}|PUBSUB_PUSH_INVOKER_SA=${_PUBSUB_PUSH_INVOKER_SA}|WEB_CONCURRENCY=2
+      - --set-env-vars=^|^ENVIRONMENT=${_ENVIRONMENT}|GOOGLE_CLOUD_PROJECT=$PROJECT_ID|ALLOWED_HOSTS=*|CORS_ALLOWED_ORIGINS=${_CORS_ALLOWED_ORIGINS}|IAM_JWT_ISSUER=brikz-iam|CERC_AUTH_URL=${_CERC_AUTH_URL}|CERC_API_BASE_URL=${_CERC_API_BASE_URL}|PUBSUB_PUSH_AUDIENCE=${_PUBSUB_PUSH_AUDIENCE}|PUBSUB_PUSH_INVOKER_SA=${_PUBSUB_PUSH_INVOKER_SA}|WEB_CONCURRENCY=2
       # O nome do segredo no Secret Manager tem sufixo _CONTRATOS (o optin já
       # usa "DJANGO_SECRET_KEY" sem sufixo) — evita os dois serviços
       # compartilharem sem querer a mesma chave de assinatura Django. O env
       # var dentro do container continua DJANGO_SECRET_KEY (nome que
       # config/settings.py já lê), só a origem no Secret Manager muda.
-      - --set-secrets=DJANGO_SECRET_KEY=DJANGO_SECRET_KEY_CONTRATOS:latest
+      - --set-secrets=DJANGO_SECRET_KEY=DJANGO_SECRET_KEY_CONTRATOS:latest,IAM_JWT_PUBLIC_KEY=IAM_JWT_PUBLIC_KEY:latest,IAM_JWT_PUBLIC_KEY_BRIKZ_IAM=IAM_JWT_PUBLIC_KEY_BRIKZ_IAM:latest
 
 substitutions:
   _TAG: manual                     # passe _TAG=$(git rev-parse --short HEAD) no submit
@@ -61,7 +61,12 @@ substitutions:
   _IMAGE: southamerica-east1-docker.pkg.dev/brikz-ap/contratos/contratos-service
   _RUNTIME_SA: contratos-run@brikz-ap.iam.gserviceaccount.com
   _ENVIRONMENT: homolog
-  _CORS_ALLOWED_ORIGINS: http://localhost:5173
+  # Duas portas do Vite: 5173 é a padrão, 5174 é o fallback automático quando
+  # a 5173 já está ocupada (outro serviço do ap-front rodando na mesma
+  # máquina). Sem a 5174 aqui, o preflight dessa origem volta 200 mas SEM
+  # Access-Control-Allow-Origin e o browser bloqueia o fetch. O separador
+  # ^|^ do --set-env-vars acima existe exatamente para esta vírgula.
+  _CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:5174,https://ap.brikz.ai,https://ap-front-1009092036032.southamerica-east1.run.app,https://ap-front-6sy5bhymwq-rj.a.run.app,https://ap-front-1009092036032.us-east1.run.app
   _CERC_AUTH_URL: https://api.int.cerc.com/oauth/token
   _CERC_API_BASE_URL: https://ap-homolog.cerc.inf.br
   # String fixa acordada entre este env var e a audiência configurada na
