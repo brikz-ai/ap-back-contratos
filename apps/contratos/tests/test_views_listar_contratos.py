@@ -1,4 +1,4 @@
-from django.test import Client
+from apps.contratos.tests.auth_teste import cliente_autenticado
 
 from apps.contratos.contrato_repository import buscar_contrato_por_referencia, inserir_contrato_criado, remover_contrato_rejeitado
 from apps.contratos import state_machine
@@ -42,7 +42,7 @@ def _limpar(referencia_externa):
 
 
 def test_listar_contratos_retorna_dados_como_lista():
-    response = Client().get(URL_LISTA)
+    response = cliente_autenticado().get(URL_LISTA)
     assert response.status_code == 200
     corpo = response.json()
     assert isinstance(corpo["dados"], list)
@@ -58,7 +58,7 @@ def test_listar_contratos_inclui_contrato_recem_criado():
             protocolo="proto-lista-1", id_contrato_cerc="cerc-lista-1",
         )
 
-        response = Client().get(URL_LISTA)
+        response = cliente_autenticado().get(URL_LISTA)
         assert response.status_code == 200
         dados = response.json()["dados"]
         encontrado = next((c for c in dados if c["referenciaExterna"] == referencia_externa), None)
@@ -82,7 +82,7 @@ def test_listar_contratos_filtro_status_exclui_outros_status():
             protocolo=None, id_contrato_cerc=None,
         )
 
-        response = Client().get(f"{URL_LISTA}?status=REGISTRADO")
+        response = cliente_autenticado().get(f"{URL_LISTA}?status=REGISTRADO")
         assert response.status_code == 200
         referencias = [c["referenciaExterna"] for c in response.json()["dados"]]
         assert referencia_externa not in referencias
@@ -93,33 +93,33 @@ def test_listar_contratos_filtro_status_exclui_outros_status():
 
 
 def test_contratos_metodo_nao_suportado_retorna_405():
-    response = Client().put(URL_LISTA, data="{}", content_type="application/json")
+    response = cliente_autenticado().put(URL_LISTA, data="{}", content_type="application/json")
     assert response.status_code == 405
 
 
 def test_listar_contratos_limit_nao_inteiro_retorna_400():
-    response = Client().get(f"{URL_LISTA}?limit=abc")
+    response = cliente_autenticado().get(f"{URL_LISTA}?limit=abc")
     assert response.status_code == 400
     corpo = response.json()
     assert "limit" in corpo.get("erro", "").lower()
 
 
 def test_listar_contratos_limit_negativo_retorna_400():
-    response = Client().get(f"{URL_LISTA}?limit=-5")
+    response = cliente_autenticado().get(f"{URL_LISTA}?limit=-5")
     assert response.status_code == 400
     corpo = response.json()
     assert "limit" in corpo.get("erro", "").lower()
 
 
 def test_listar_contratos_limit_zero_retorna_400():
-    response = Client().get(f"{URL_LISTA}?limit=0")
+    response = cliente_autenticado().get(f"{URL_LISTA}?limit=0")
     assert response.status_code == 400
     corpo = response.json()
     assert "limit" in corpo.get("erro", "").lower()
 
 
 def test_listar_contratos_financiador_desconhecido_retorna_404():
-    response = Client().get("/api/v1/contratos/99999999000199")
+    response = cliente_autenticado("99999999000199").get("/api/v1/contratos/99999999000199")
     assert response.status_code == 404
 
 
@@ -140,7 +140,7 @@ def test_listar_contratos_limit_aplica_no_resultado():
             protocolo="proto-lista-limit-2", id_contrato_cerc="cerc-lista-limit-2",
         )
 
-        response = Client().get(f"{URL_LISTA}?limit=1")
+        response = cliente_autenticado().get(f"{URL_LISTA}?limit=1")
         assert response.status_code == 200
         dados = response.json()["dados"]
         assert len(dados) == 1
@@ -172,7 +172,7 @@ def test_listar_filtra_por_documento_contratante():
                 protocolo=f"proto-{ref}", id_contrato_cerc=f"cerc-{ref}",
             )
 
-        response = Client().get(f"{URL_LISTA}?documentoContratante={doc_alvo}")
+        response = cliente_autenticado().get(f"{URL_LISTA}?documentoContratante={doc_alvo}")
         assert response.status_code == 200
         referencias = [c["referenciaExterna"] for c in response.json()["dados"]]
         assert ref_alvo in referencias
@@ -204,7 +204,7 @@ def test_listar_sem_filtro_preserva_comportamento_atual():
                 FINANCIADOR_TESTE, payload, status=state_machine.AGUARDANDO_WEBHOOK,
                 protocolo=f"proto-{ref}", id_contrato_cerc=f"cerc-{ref}",
             )
-        response = Client().get(URL_LISTA)
+        response = cliente_autenticado().get(URL_LISTA)
         assert response.status_code == 200
         referencias = [c["referenciaExterna"] for c in response.json()["dados"]]
         assert ref_1 in referencias
@@ -232,7 +232,7 @@ def test_listar_filtra_por_documento_contratante_pontuado_na_criacao():
             FINANCIADOR_TESTE, payload, status=state_machine.AGUARDANDO_WEBHOOK,
             protocolo="proto-pontuado", id_contrato_cerc="cerc-pontuado",
         )
-        response = Client().get(f"{URL_LISTA}?documentoContratante={doc_normalizado}")
+        response = cliente_autenticado().get(f"{URL_LISTA}?documentoContratante={doc_normalizado}")
         assert response.status_code == 200
         assert ref in [c["referenciaExterna"] for c in response.json()["dados"]]
     finally:
@@ -252,10 +252,10 @@ def test_listar_filtro_combina_com_status():
             FINANCIADOR_TESTE, payload, status=state_machine.AGUARDANDO_WEBHOOK,
             protocolo="proto-status", id_contrato_cerc="cerc-status",
         )
-        casa = Client().get(f"{URL_LISTA}?documentoContratante={doc}&status={state_machine.AGUARDANDO_WEBHOOK}")
+        casa = cliente_autenticado().get(f"{URL_LISTA}?documentoContratante={doc}&status={state_machine.AGUARDANDO_WEBHOOK}")
         assert ref in [c["referenciaExterna"] for c in casa.json()["dados"]]
 
-        nao_casa = Client().get(f"{URL_LISTA}?documentoContratante={doc}&status={state_machine.REGISTRADO}")
+        nao_casa = cliente_autenticado().get(f"{URL_LISTA}?documentoContratante={doc}&status={state_machine.REGISTRADO}")
         assert ref not in [c["referenciaExterna"] for c in nao_casa.json()["dados"]]
     finally:
         _limpar(ref)

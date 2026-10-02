@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from django.test import Client
+from apps.contratos.tests.auth_teste import cliente_autenticado
 
 from apps.contratos import state_machine
 from apps.contratos.contrato_repository import buscar_contrato_por_referencia, inserir_contrato_criado, remover_contrato_rejeitado
@@ -59,12 +59,12 @@ def _limpar(referencia_externa):
 
 
 def test_detalhar_contrato_inexistente_retorna_404():
-    response = Client().get(f"/api/v1/contratos/{FINANCIADOR_TESTE}/00000000-0000-0000-0000-000000000000")
+    response = cliente_autenticado().get(f"/api/v1/contratos/{FINANCIADOR_TESTE}/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 404
 
 
 def test_detalhar_contrato_financiador_desconhecido_retorna_404():
-    response = Client().get("/api/v1/contratos/99999999000199/00000000-0000-0000-0000-000000000000")
+    response = cliente_autenticado("99999999000199").get("/api/v1/contratos/99999999000199/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 404
 
 
@@ -89,7 +89,7 @@ def test_detalhar_contrato_traz_garantias_e_urs():
             "origem": "WEBHOOK", "snapshot_em": datetime.now(timezone.utc),
         }).execute()
 
-        response = Client().get(f"/api/v1/contratos/{FINANCIADOR_TESTE}/{contrato['id']}")
+        response = cliente_autenticado().get(f"/api/v1/contratos/{FINANCIADOR_TESTE}/{contrato['id']}")
         assert response.status_code == 200
         corpo = response.json()
         assert corpo["referenciaExterna"] == referencia_externa
