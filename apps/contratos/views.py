@@ -1,4 +1,5 @@
 import base64
+import functools
 import hmac
 import json
 import logging
@@ -58,6 +59,27 @@ _TENANTS_JOBS_PERIODICOS = ["12345678000199"]
 
 def health(request):
     return JsonResponse({"status": "ok"})
+
+
+def _financiador_do_token(view_func):
+    """Recusa (403) quando o financiador da URL não é o do claim do JWT.
+
+    Vai SEMPRE abaixo de @jwt_required (precisa de request.financiador_id).
+    Sem isto, qualquer token válido de um financiador leria, criaria,
+    inativaria ou baixaria contratos de outro só trocando o CNPJ da URL — o
+    financiador_id (CNPJ) não é segredo. Mesma regra e mesmo corpo de
+    eventos_contrato: o claim é a autoridade, a URL só é aceita quando
+    coincide."""
+    @functools.wraps(view_func)
+    def wrapper(request, financiador_id: str, *args, **kwargs):
+        if request.financiador_id != financiador_id:
+            return JsonResponse(
+                {"erro": "FINANCIADOR_DIVERGENTE", "mensagem": "financiador do token não confere com o da URL"},
+                status=403,
+            )
+        return view_func(request, financiador_id, *args, **kwargs)
+
+    return wrapper
 
 
 def _violacao_unique(erro: DBAPIError) -> bool:
@@ -455,6 +477,10 @@ def _indicador_para_dto(i: dict) -> dict:
     }
 
 
+# @jwt_required ACIMA do decorador de método (mesmo motivo de
+# eventos_contrato abaixo): sem token, 401 antes de qualquer 405.
+@jwt_required
+@_financiador_do_token
 @require_GET
 def detalhar_contrato(request, financiador_id: str, contrato_id: str):
     """GET /api/v1/contratos/<financiador_id>/<id> — detalhe de um
@@ -614,6 +640,9 @@ def eventos_contrato(request, financiador_id: str, contrato_id: str):
     return resposta
 
 
+# Protege os dois verbos da coleção (listar e criar) de uma vez.
+@jwt_required
+@_financiador_do_token
 def contratos(request, financiador_id: str):
     """Dispatcher da URL de coleção `/contratos/<financiador_id>`: POST cria
     (tipoOperacao=C, comportamento existente de `criar_contrato`), GET lista.
@@ -880,12 +909,20 @@ def _operacao_pos_registro(request, financiador_id: str, tipo_operacao: str, cer
         }, status=500)
 
 
+# @jwt_required ACIMA do decorador de método (mesmo motivo de
+# eventos_contrato abaixo): sem token, 401 antes de qualquer 405.
+@jwt_required
+@_financiador_do_token
 @require_POST
 def inativar_contrato(request, financiador_id: str):
     """POST /api/v1/contratos/<financiador_id>/inativar — tipoOperacao=I."""
     return _operacao_pos_registro(request, financiador_id, "I", cerc_inativar_contrato)
 
 
+# @jwt_required ACIMA do decorador de método (mesmo motivo de
+# eventos_contrato abaixo): sem token, 401 antes de qualquer 405.
+@jwt_required
+@_financiador_do_token
 @require_POST
 def baixar_contrato(request, financiador_id: str):
     """POST /api/v1/contratos/<financiador_id>/baixar — tipoOperacao=B."""

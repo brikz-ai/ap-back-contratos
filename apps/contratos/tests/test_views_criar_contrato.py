@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import httpx
 import pytest
 import respx
-from django.test import Client
+from apps.contratos.tests.auth_teste import cliente_autenticado
 
 from apps.contratos.contrato_repository import buscar_contrato_por_referencia
 from shared.cloudsql_client import get_db
@@ -72,20 +72,20 @@ def _mock_token():
 
 
 def test_criar_contrato_get_retorna_lista_nao_405():
-    response = Client().get(URL)
+    response = cliente_autenticado().get(URL)
     assert response.status_code == 200
     assert "dados" in response.json()
 
 
 def test_criar_contrato_corpo_nao_json_retorna_400():
-    response = Client().post(URL, data="isto nao e json", content_type="text/plain")
+    response = cliente_autenticado().post(URL, data="isto nao e json", content_type="text/plain")
     assert response.status_code == 400
 
 
 def test_criar_contrato_validacao_local_falha_retorna_422():
     payload = _payload("CTR-TESTE-VIEW-INVALIDO")
     payload["saldoDevedor"] = 0.00
-    response = Client().post(URL, data=json.dumps(payload), content_type="application/json")
+    response = cliente_autenticado().post(URL, data=json.dumps(payload), content_type="application/json")
     assert response.status_code == 422
     corpo = response.json()
     assert corpo["codigo"] == "C04"
@@ -105,7 +105,7 @@ def test_criar_contrato_sucesso_207_status_0_persiste_aguardando_webhook():
             }])
         )
 
-        response = Client().post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
+        response = cliente_autenticado().post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
 
         assert response.status_code == 202
         corpo = response.json()
@@ -133,7 +133,7 @@ def test_criar_contrato_207_status_1_persiste_rejeitado_estrutural_e_retorna_422
             }])
         )
 
-        response = Client().post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
+        response = cliente_autenticado().post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
 
         assert response.status_code == 422
         contrato = buscar_contrato_por_referencia(FINANCIADOR_TESTE, referencia_externa)
@@ -155,7 +155,7 @@ def test_criar_contrato_referencia_externa_repetida_e_idempotente_nao_chama_cerc
             }])
         )
 
-        cliente = Client()
+        cliente = cliente_autenticado()
         r1 = cliente.post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
         r2 = cliente.post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
 
@@ -176,7 +176,7 @@ def test_criar_contrato_erro_cerc_retorna_502():
             return_value=httpx.Response(500, json={"erro": "indisponível"})
         )
 
-        response = Client().post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
+        response = cliente_autenticado().post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
 
         assert response.status_code == 502
         assert buscar_contrato_por_referencia(FINANCIADOR_TESTE, referencia_externa) is None
@@ -211,7 +211,7 @@ def test_criar_contrato_resubmissao_de_rejeitado_estrutural_chama_cerc_de_novo_e
             ]
         )
 
-        cliente = Client()
+        cliente = cliente_autenticado()
         r1 = cliente.post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
         assert r1.status_code == 422
         rejeitado = buscar_contrato_por_referencia(FINANCIADOR_TESTE, referencia_externa)
@@ -265,7 +265,7 @@ def test_criar_contrato_rejeicao_estrutural_devolve_erros_da_cerc_e_grava_contra
             }])
         )
 
-        response = Client().post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
+        response = cliente_autenticado().post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
 
         assert response.status_code == 422
         corpo = response.json()
@@ -286,7 +286,7 @@ def test_criar_contrato_corpo_json_nao_objeto_retorna_400(corpo_json):
     # Revisão final, achado 7: json.loads aceita qualquer valor JSON de topo;
     # payload.get(...) num array/string/número/None explodia com AttributeError
     # (500) em vez de devolver um 400 limpo.
-    response = Client().post(URL, data=corpo_json, content_type="application/json")
+    response = cliente_autenticado().post(URL, data=corpo_json, content_type="application/json")
     assert response.status_code == 400
     assert "objeto JSON" in response.json()["erro"]
 
@@ -314,7 +314,7 @@ def test_criar_contrato_falha_ao_persistir_apos_207_retorna_500_e_nao_propaga(mo
 
         monkeypatch.setattr("apps.contratos.views.inserir_contrato_criado", _explode)
 
-        response = Client().post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
+        response = cliente_autenticado().post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
 
         assert response.status_code == 500
         corpo = response.json()
@@ -335,7 +335,7 @@ def test_criar_contrato_207_com_array_vazio_retorna_500_em_vez_de_index_error():
             return_value=httpx.Response(207, json=[])
         )
 
-        response = Client().post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
+        response = cliente_autenticado().post(URL, data=json.dumps(_payload(referencia_externa)), content_type="application/json")
 
         assert response.status_code == 500
         assert buscar_contrato_por_referencia(FINANCIADOR_TESTE, referencia_externa) is None
@@ -361,7 +361,7 @@ def test_criar_contrato_campo_obrigatorio_nivel_contrato_ausente_retorna_422_sem
         payload["repactuacao"] = "1"
         del payload["identificacaoGestaoEntidadeRegistradora"]
 
-        response = Client().post(URL, data=json.dumps(payload), content_type="application/json")
+        response = cliente_autenticado().post(URL, data=json.dumps(payload), content_type="application/json")
 
         assert response.status_code == 422
         corpo = response.json()

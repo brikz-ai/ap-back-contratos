@@ -6,7 +6,7 @@ from decimal import Decimal
 import httpx
 import pytest
 import respx
-from django.test import Client
+from apps.contratos.tests.auth_teste import cliente_autenticado
 
 from shared.cloudsql_client import get_db
 
@@ -63,33 +63,33 @@ def _limpar(contrato_id):
 
 @pytest.mark.parametrize("tipo_operacao,sufixo,estado_espera,estado_terminal,_outro", OPERACOES)
 def test_get_retorna_405(tipo_operacao, sufixo, estado_espera, estado_terminal, _outro):
-    response = Client().get(_url(sufixo))
+    response = cliente_autenticado().get(_url(sufixo))
     assert response.status_code == 405
 
 
 @pytest.mark.parametrize("tipo_operacao,sufixo,estado_espera,estado_terminal,_outro", OPERACOES)
 def test_corpo_nao_json_retorna_400(tipo_operacao, sufixo, estado_espera, estado_terminal, _outro):
-    response = Client().post(_url(sufixo), data="isto nao e json", content_type="text/plain")
+    response = cliente_autenticado().post(_url(sufixo), data="isto nao e json", content_type="text/plain")
     assert response.status_code == 400
 
 
 @pytest.mark.parametrize("tipo_operacao,sufixo,estado_espera,estado_terminal,_outro", OPERACOES)
 @pytest.mark.parametrize("corpo_json", ["[]", '"string"', "42", "null"])
 def test_corpo_json_nao_objeto_retorna_400(tipo_operacao, sufixo, estado_espera, estado_terminal, _outro, corpo_json):
-    response = Client().post(_url(sufixo), data=corpo_json, content_type="application/json")
+    response = cliente_autenticado().post(_url(sufixo), data=corpo_json, content_type="application/json")
     assert response.status_code == 400
 
 
 @pytest.mark.parametrize("tipo_operacao,sufixo,estado_espera,estado_terminal,_outro", OPERACOES)
 def test_referencia_externa_ausente_retorna_422(tipo_operacao, sufixo, estado_espera, estado_terminal, _outro):
-    response = Client().post(_url(sufixo), data=json.dumps({}), content_type="application/json")
+    response = cliente_autenticado().post(_url(sufixo), data=json.dumps({}), content_type="application/json")
     assert response.status_code == 422
     assert response.json()["codigo"] == "CAMPO_OBRIGATORIO"
 
 
 @pytest.mark.parametrize("tipo_operacao,sufixo,estado_espera,estado_terminal,_outro", OPERACOES)
 def test_contrato_nao_encontrado_retorna_404(tipo_operacao, sufixo, estado_espera, estado_terminal, _outro):
-    response = Client().post(
+    response = cliente_autenticado().post(
         _url(sufixo), data=json.dumps({"referenciaExterna": "CTR-NUNCA-EXISTIU"}), content_type="application/json",
     )
     assert response.status_code == 404
@@ -100,7 +100,7 @@ def test_estado_incompativel_retorna_409(tipo_operacao, sufixo, estado_espera, e
     referencia_externa = f"CTR-TESTE-VIEW-{sufixo}-409"
     contrato = _inserir_contrato(referencia_externa, status="AGUARDANDO_WEBHOOK")
     try:
-        response = Client().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
+        response = cliente_autenticado().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
         assert response.status_code == 409
     finally:
         _limpar(contrato["id"])
@@ -111,7 +111,7 @@ def test_conflito_com_a_outra_operacao_em_curso_retorna_409(tipo_operacao, sufix
     referencia_externa = f"CTR-TESTE-VIEW-{sufixo}-409-CRUZADO"
     contrato = _inserir_contrato(referencia_externa, status=outro_estado_espera)
     try:
-        response = Client().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
+        response = cliente_autenticado().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
         assert response.status_code == 409
     finally:
         _limpar(contrato["id"])
@@ -131,7 +131,7 @@ def test_sucesso_207_status_0_persiste_estado_de_espera(tipo_operacao, sufixo, e
             }])
         )
 
-        response = Client().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
+        response = cliente_autenticado().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
 
         assert response.status_code == 202
         corpo = response.json()
@@ -160,7 +160,7 @@ def test_207_status_1_volta_para_registrado_e_retorna_422(tipo_operacao, sufixo,
             }])
         )
 
-        response = Client().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
+        response = cliente_autenticado().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
 
         assert response.status_code == 422
         corpo = response.json()
@@ -183,7 +183,7 @@ def test_replay_a_partir_do_estado_de_espera_nao_chama_a_cerc_de_novo(tipo_opera
             return_value=httpx.Response(207, json=[{"referenciaExterna": referencia_externa, "protocolo": "nao-deveria-usar", "status": "0", "erros": []}])
         )
 
-        response = Client().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
+        response = cliente_autenticado().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
 
         assert response.status_code == 202
         assert response.json()["status"] == estado_espera
@@ -202,7 +202,7 @@ def test_replay_a_partir_do_estado_terminal_nao_chama_a_cerc_de_novo(tipo_operac
             return_value=httpx.Response(207, json=[{"referenciaExterna": referencia_externa, "protocolo": "nao-deveria-usar", "status": "0", "erros": []}])
         )
 
-        response = Client().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
+        response = cliente_autenticado().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
 
         assert response.status_code == 202
         assert response.json()["status"] == estado_terminal
@@ -220,7 +220,7 @@ def test_erro_cerc_retorna_502(tipo_operacao, sufixo, estado_espera, estado_term
         _mock_token()
         respx.put("https://ap-homolog.cerc.inf.br/v15/contratos").mock(return_value=httpx.Response(500, json={"erro": "indisponível"}))
 
-        response = Client().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
+        response = cliente_autenticado().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
 
         assert response.status_code == 502
         atualizado = get_db(FINANCIADOR_TESTE).table("contrato").select("*").eq("id", contrato["id"]).execute().data[0]
@@ -238,7 +238,7 @@ def test_207_com_array_vazio_retorna_500(tipo_operacao, sufixo, estado_espera, e
         _mock_token()
         respx.put("https://ap-homolog.cerc.inf.br/v15/contratos").mock(return_value=httpx.Response(207, json=[]))
 
-        response = Client().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
+        response = cliente_autenticado().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
 
         assert response.status_code == 500
     finally:
@@ -264,7 +264,7 @@ def test_falha_ao_persistir_apos_207_retorna_500(tipo_operacao, sufixo, estado_e
 
         monkeypatch.setattr("apps.contratos.views.atualizar_status_pos_registro", _explode)
 
-        response = Client().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
+        response = cliente_autenticado().post(_url(sufixo), data=json.dumps({"referenciaExterna": referencia_externa}), content_type="application/json")
 
         assert response.status_code == 500
         corpo = response.json()

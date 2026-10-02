@@ -1,10 +1,14 @@
 from django.urls import path, re_path
 from . import views
 
-# Assimetria de autenticação: /eventos é a única rota autenticada (@jwt_required)
-# hoje, porque devolve os request/response crus trocados com a CERC (ISPB,
-# agência, conta). As demais de leitura (contratos, detalhe) e as de
-# inativar/baixar seguem abertas — pendência conhecida, não decisão de projeto.
+# Autenticação: todas as rotas de /contratos/<financiador_id> (listar, criar,
+# detalhar, eventos, inativar, baixar) exigem JWT do IAM (@jwt_required) e
+# recusam com 403 financiador da URL diferente do claim. Antes só /eventos era
+# protegida; as demais ficavam abertas com o serviço público no Cloud Run
+# (pendência registrada em docs/superpowers/specs/2026-09-04-deploy-gcp-
+# contratos-design.md §2.2). Seguem sem JWT, de propósito: health, o webhook
+# da CERC (Basic Auth por tenant), o push do Pub/Sub e o job do Scheduler
+# (OIDC do Google).
 urlpatterns = [
     path("health", views.health),
     re_path(r"^webhooks/contrato/(?P<financiador_id>\d{14})$", views.webhook_contrato),

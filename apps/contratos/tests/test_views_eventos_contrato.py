@@ -32,7 +32,7 @@ def chave_privada(monkeypatch):
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     ).decode()
-    monkeypatch.setenv("IAM_JWT_PUBLIC_KEY", publica)
+    monkeypatch.setenv("IAM_JWT_PUBLIC_KEY_BRIKZ_IAM", publica)
     monkeypatch.setenv("IAM_JWT_ISSUER", ISSUER)
     return privada
 
@@ -40,7 +40,7 @@ def chave_privada(monkeypatch):
 def _auth(privada, financiador_id=FINANCIADOR_TESTE):
     agora = int(time.time())
     token = pyjwt.encode(
-        {"iss": ISSUER, "sub": "teste", "iat": agora,
+        {"iss": ISSUER, "type": "access", "sub": "teste", "iat": agora,
          "exp": agora + 3600, "financiador_id": financiador_id},
         privada, algorithm="RS256",
     )
